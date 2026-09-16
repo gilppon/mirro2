@@ -20,7 +20,7 @@ import { ACTION_KR, MirrorBrain, type LAction } from './brain';
 import { emptyRaw, type ActKind, type RawProfile } from './dna';
 import { BUCKET_KEYS, DnaBot, type BotState } from './dnaBot';
 import { KRA, initRun, type Mission, type MissionRun } from './missions';
-import { xpForAction } from './evolution';
+import { xpForAction, pickVariant, type VariantDef } from './evolution';
 import {
   emptyTally, makeRead, tallyBreak, tallyRead,
   type ReadEvent, type ReadKind, type ReadTally,
@@ -522,6 +522,16 @@ export class Engine {
   /** 던전 5층: SIMULA가 플레이어의 최악 습관만 사용 */
   setWorstHabitMode(acts: string[]) {
     this.brain.worstHabits = acts;
+  }
+
+  // ═══════════════════════════════════════════════
+  //  다차원 난이도 — 같은 단계, 다른 전략 (arXiv 2211.02759)
+  // ═══════════════════════════════════════════════
+  /** 매치 시작 시 호출: 시드 기반으로 시뮬라의 전략 variant 부여 */
+  assignVariant(seed: number): VariantDef {
+    const v = pickVariant(seed);
+    this.brain.setVariant(v);
+    return v;
   }
 
   startMission(m: Mission) {

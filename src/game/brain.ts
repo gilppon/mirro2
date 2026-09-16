@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────
 import type { AttackId, Intent } from './types';
 import { NEUTRAL_INTENT } from './types';
-import { stageOf, stageProgress, type StageDef } from './evolution';
+import { stageOf, stageProgress, applyVariant, type StageDef, type VariantDef } from './evolution';
 
 export type LAction =
   | 'light' | 'heavy' | 'low' | 'grab'
@@ -97,6 +97,9 @@ export interface BrainSnapshot {
   stageRatio: number;
   stageRemain: number;
   nextStageKr: string | null;
+  variantKr: string | null;
+  variantEn: string | null;
+  variantMotto: string | null;
   levelUpFlash: number;
 }
 
@@ -171,8 +174,15 @@ export class MirrorBrain {
   // ── 진화 단계 (누적 XP 기반)
   xp = 0;
   stage: StageDef = stageOf(0);
+  /** 다차원 난이도: 같은 단계라도 전략(아키타입 variant)이 다르다 (arXiv 2211.02759) */
+  variant: VariantDef | null = null;
   levelUpFlash = 0;
   justLeveled: StageDef | null = null;
+
+  setVariant(v: VariantDef | null) {
+    this.variant = v;
+    if (v) this.pushLog(`전략 변이 — ${v.kr} (${v.en})`);
+  }
 
   setXp(v: number) {
     this.xp = v;
@@ -191,7 +201,7 @@ export class MirrorBrain {
   addXp(v: number) { this.setXp(this.xp + v); }
 
   get params() {
-    const p = this.stage.p;
+    const p = applyVariant(this.stage.p, this.variant);
     // 라운드가 진행될수록 단계 내에서도 조금씩 날카로워진다
     const r = Math.min(3, this.round) - 1;
     return {
@@ -627,6 +637,9 @@ export class MirrorBrain {
       stageRatio: stageProgress(this.xp).ratio,
       stageRemain: stageProgress(this.xp).remain,
       nextStageKr: stageProgress(this.xp).next?.kr ?? null,
+      variantKr: this.variant?.kr ?? null,
+      variantEn: this.variant?.en ?? null,
+      variantMotto: this.variant?.motto ?? null,
       levelUpFlash: this.levelUpFlash,
     };
   }

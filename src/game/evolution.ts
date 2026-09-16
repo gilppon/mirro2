@@ -2,6 +2,7 @@
 //  SIMULA EVOLUTION — AI는 한 번에 완성되지 않는다
 //  관찰자 → 모방자 → 예측자 → 처벌자 → 복제자 → 배신자
 // ─────────────────────────────────────────────────────────────
+import type { Archetype } from './dna';
 
 export interface StageDef {
   lv: number;
@@ -110,4 +111,87 @@ export function stageProgress(xp: number): { cur: StageDef; next: StageDef | nul
 /** XP 획득량: 행동 종류/예측 성공에 따라 가중 */
 export function xpForAction(predicted: boolean): number {
   return predicted ? 2.2 : 1;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  다차원 난이도 (arXiv 2211.02759, Halina & Guzdial)
+//  "난이도 레벨당 전략 1개"는 인간 같지 않다.
+//  같은 진화 단계(LV)라도 전략(아키타입 variant)이 달라야
+//  시뮬라가 한 명 더 있는 것처럼 느껴진다.
+// ─────────────────────────────────────────────────────────────
+export type VariantParam = 'model' | 'mimic' | 'react' | 'aggro' | 'mirror' | 'punish' | 'noise';
+
+export interface VariantDef {
+  key: Archetype;
+  kr: string;
+  en: string;
+  /** 이 variant가 시뮬라에게 부여하는 전략 정체성 */
+  motto: string;
+  /** StageDef.p 각 항목의 승수 (dmgScale은 건드리지 않는다 — 난이도 조작 금지 원칙) */
+  mod: Partial<Record<VariantParam, number>>;
+}
+
+export const VARIANTS: VariantDef[] = [
+  {
+    key: 'RUSHER', kr: '돌진형', en: 'RUSHER',
+    motto: '거리를 지우고 밀어붙입니다.',
+    mod: { aggro: 1.28, react: 0.84, punish: 0.82, mirror: 0.8, noise: 0.85 },
+  },
+  {
+    key: 'COUNTER_HUNTER', kr: '카운터 사냥꾼', en: 'COUNTER HUNTER',
+    motto: '당신이 먼저 움직이기를 기다립니다.',
+    mod: { punish: 1.34, model: 1.12, aggro: 0.78, react: 0.9 },
+  },
+  {
+    key: 'THROW_ADDICT', kr: '잡기 중독자', en: 'THROW ADDICT',
+    motto: '가드는 결국 뚫립니다.',
+    mod: { aggro: 1.06, mimic: 1.22, noise: 1.18 },
+  },
+  {
+    key: 'TURTLE_GUARD', kr: '거북이 수비', en: 'TURTLE GUARD',
+    motto: '실수를 기다리는 벽이 됩니다.',
+    mod: { aggro: 0.68, punish: 1.18, react: 1.12 },
+  },
+  {
+    key: 'PANIC_JUMPER', kr: '패닉 점퍼', en: 'PANIC JUMPER',
+    motto: '예측할 수 없는 움직임이 방어입니다.',
+    mod: { noise: 1.55, aggro: 0.86, mirror: 0.9 },
+  },
+  {
+    key: 'COMBO_REPEATER', kr: '콤보 반복자', en: 'COMBO REPEATER',
+    motto: '배운 연결을 끝까지 재현합니다.',
+    mod: { mimic: 1.4, model: 1.06 },
+  },
+  {
+    key: 'FRAME_TRAP_LOVER', kr: '프레임 트랩꾼', en: 'FRAME TRAP LOVER',
+    motto: '틈을 파고 물어뜯습니다.',
+    mod: { model: 1.16, punish: 1.12, mirror: 1.1 },
+  },
+  {
+    key: 'RANDOM_TRICKSTER', kr: '무작위 트릭스터', en: 'RANDOM TRICKSTER',
+    motto: '저를 읽는 것 자체가 헛수고입니다.',
+    mod: { noise: 1.85, model: 0.84, punish: 0.78 },
+  },
+];
+
+/** 스테이지 파라미터에 variant 변조 적용 (결정론 — 승수 곱 후 클램프) */
+export function applyVariant(p: StageDef['p'], v: VariantDef | null): StageDef['p'] {
+  if (!v) return p;
+  const m = v.mod;
+  const cl = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
+  return {
+    model: cl(p.model * (m.model ?? 1), 0, 1),
+    mimic: cl(p.mimic * (m.mimic ?? 1), 0, 1),
+    react: cl(Math.round(p.react * (m.react ?? 1)), 2, 30),
+    aggro: cl(p.aggro * (m.aggro ?? 1), 0.05, 1),
+    mirror: cl(p.mirror * (m.mirror ?? 1), 0, 1),
+    punish: cl(p.punish * (m.punish ?? 1), 0, 1),
+    noise: cl(p.noise * (m.noise ?? 1), 0.02, 1),
+    dmgScale: p.dmgScale,
+  };
+}
+
+/** 시드 기반 variant 선택 (같은 시드 → 같은 variant, 시뮬레이션 재현성 유지) */
+export function pickVariant(seed: number): VariantDef {
+  return VARIANTS[Math.abs(Math.floor(seed)) % VARIANTS.length];
 }

@@ -38,6 +38,7 @@ import {
 } from './game/store';
 import { STAGES } from './game/evolution';
 import { missionById, type Mission } from './game/missions';
+import Tutorial, { markTutorialDone, tutorialDone } from './components/Tutorial';
 
 type Screen = 'title' | 'lab' | 'train' | 'aimatch';
 
@@ -70,6 +71,7 @@ export default function App() {
   const [lastCause, setLastCause] = useState<DefeatData['cause'] | null>(null);
   const [replays, setReplays] = useState<Replay[]>(() => loadReplays());
   const [shareOpen, setShareOpen] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(() => !tutorialDone());
   const beforeRef = useRef<{ aerial: number; grab: number; repetition: number; panic: number } | null>(null);
 
   const spectate = screen === 'aimatch';
@@ -277,6 +279,7 @@ export default function App() {
     eng.drill = null; eng.drillProgress = 0; eng.drillFails = 0; eng.drillDone = false;
     eng.clearMission(); setActiveMission(null);
     eng.setWorstHabitMode([]);
+    eng.assignVariant((Math.random() * 1e9) | 0);   // 다차원 난이도: 매 매치 다른 전략
     setActiveFloor(null);
     setActiveDrill(null);
     setShowReport(false); setDefeat(null); setVictory(null);
@@ -315,6 +318,7 @@ export default function App() {
     eng.recording = true; eng.headless = false;
     eng.names = ['당신', '시뮬라'];
     restart();
+    eng.assignVariant((Math.random() * 1e9) | 0);   // 다차원 난이도: 매 드릴 다른 전략
     eng.startDrill(d.id, d.banned, d.required ?? [], d.target);
     setActiveDrill(d.id);
     setShowReport(false);
@@ -461,6 +465,7 @@ export default function App() {
     eng.names = ['당신', `SIMULA ${f.n}F`];
     eng.drill = null; eng.drillProgress = 0; eng.drillFails = 0; eng.drillDone = false;
     restart();
+    eng.assignVariant((Math.random() * 1e9) | 0);   // 다차원 난이도: 매 입장 다른 전략
     // 층에 맞춰 SIMULA 진화 단계 강제
     const st = STAGES.find((s) => s.lv === f.stageLv);
     if (st) eng.brain.setXp(st.need);
@@ -489,6 +494,7 @@ export default function App() {
     eng.recording = true; eng.headless = false;
     eng.names = ['당신', '시뮬라'];
     eng.drill = null; eng.drillProgress = 0; eng.drillFails = 0; eng.drillDone = false;
+    eng.assignVariant((Math.random() * 1e9) | 0);   // 다차원 난이도: 매 미션 다른 전략
     restart();
     eng.startMission(m);
     setActiveMission(m);
@@ -754,6 +760,11 @@ export default function App() {
               ratio={b.stageRatio} remain={b.stageRemain} nextKr={b.nextStageKr}
             />
           )}
+          {!isAi && b.variantKr && (
+            <span className="w-fit rounded border border-fuchsia-400/40 bg-fuchsia-500/15 px-2 py-0.5 font-mono text-[9px] font-bold tracking-[0.15em] text-fuchsia-200 backdrop-blur">
+              ▞ {b.variantKr} · {b.variantEn}
+            </span>
+          )}
         </div>
 
         {/* 우상단: 컨트롤 */}
@@ -867,6 +878,11 @@ export default function App() {
           onRetry={startTrain}
           onLab={toLab}
         />
+      )}
+
+      {/* 첫 진입 온보딩 (E-3) — 1회 표시 */}
+      {showTutorial && !isAi && (
+        <Tutorial onDone={() => { markTutorialDone(); setShowTutorial(false); }} />
       )}
     </div>
   );

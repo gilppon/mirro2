@@ -113,3 +113,40 @@
 2. Phase 1: 다차원 난이도(D-1, evolution.ts에 아키타입 variant 축), `humanLikeness()` 지표(D-3), 튜토리얼 3단계(E-3)
 3. Phase 2: 섀도우 서버(C-1~C-3) — `simulateMatch`의 시드 재현성이 서버 재검증의 기반이 됨 (이번에 확보됨)
 4. Phase 3: 롤백 넷코드(B) — `snapshot()/restore()/checksum()`이 이미 준비됨 (이번에 확보됨)
+
+---
+
+## Part 4. 구현 상태 (2026-09-16, 2차 업데이트)
+
+### ✅ Phase 1 완료 — D-1 다차원 난이도 · D-3 humanLikeness · E-3 튜토리얼
+
+| 작업 | 상태 | 위치 |
+|---|---|---|
+| **D-1** 다차원 난이도 variant 시스템 — 8 아키타입별 파라미터 변조 (`VARIANTS`, `applyVariant`, `pickVariant`) | ✅ | `src/game/evolution.ts` |
+| **D-1** `MirrorBrain.variant` 필드 + `setVariant()` + `params` getter에 variant 보정 적용 | ✅ | `src/game/brain.ts` |
+| **D-1** `Engine.assignVariant(seed)` — 매치 시작 시 시드 기반 전략 부여 | ✅ | `src/game/engine.ts` |
+| **D-1** `startTrain / startDrill / startMission / enterFloor`에서 variant 주입 + HUD variant 배지 | ✅ | `src/App.tsx` |
+| **D-1** `BrainSnapshot`에 `variantKr / variantEn / variantMotto` 추가 | ✅ | `src/game/brain.ts` |
+| **D-3** `humanLikeness(dna, raw)` — 5지표(행동 엔트로피·상황 적응·콤보 습관·헛스윙·거리 활용) + 반복성 페널티, 신뢰도 포함 | ✅ | `src/game/humanlikeness.ts` (신규) |
+| **D-3** AI LAB에 HUMAN-LIKENESS 카드 (등급 문장 + 지표별 breakdown) | ✅ | `src/components/LabScreen.tsx` |
+| **E-3** 3단계 튜토리얼 오버레이 (조작 → 캔슬 콤보 → 역-학습 핵심), 1회만 표시, ESC 건너뛰기 | ✅ | `src/components/Tutorial.tsx` (신규) + `App.tsx` |
+| 테스트 6개 추가 (humanLikeness) → **총 14개 전부 통과** | ✅ | `src/game/humanlikeness.test.ts` |
+
+**설계 원칙 (D-1):**
+- variant는 **난수 소스가 아니라 파라미터 변조**만 수행 → 결정론(`setDeterminism`)과 충돌 없음.
+- `dmgScale`은 variant가 건드리지 않음 — **"난이도 조작 금지" 안티패턴 원칙 준수** (어려움의 *종류*만 개인화).
+- `pickVariant`는 시드 결정적 → 서버 재검증 시나리오(Phase 2)에서도 재현 가능.
+
+**검증 결과:** `tsc --noEmit` 0 에러 / `vitest run` **14/14 통과** / `npm run build` 성공 (dist/index.html 572.90 kB).
+
+### Phase 0-A (결정론 코어) — 이전 완료 요약
+
+| 작업 | 상태 | 위치 |
+|---|---|---|
+| 공용 결정론 RNG 모듈 (xorshift32, 시드 믹싱, FNV 해시, 양자화) | ✅ | `src/game/rng.ts` |
+| Engine 난수/시계 DI (`this.rng()` / `this.now()`) | ✅ | `src/game/engine.ts` |
+| Brain 난수 DI — `Math.random()` 17곳 제거 | ✅ | `src/game/brain.ts` |
+| `setDeterminism(seed)` / `snapshot()` / `restore()` / `checksum()` | ✅ | `engine.ts` + `snapshot.ts` |
+| `simulateMatch` 시드 주입 | ✅ | `src/game/meta.ts` |
+| 결정론 회귀 테스트 8개 | ✅ | `src/game/determinism.test.ts` |
+| git 초기화 + vitest | ✅ | `.git/`, `package.json` |

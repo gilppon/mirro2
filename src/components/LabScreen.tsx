@@ -8,6 +8,7 @@ import {
 } from '../game/dna';
 import { RIVALS, TRAIN_TARGET, type AiFighter, type MatchResult, type OfflineReport } from '../game/meta';
 import { leaguePool } from '../game/ghost';
+import { humanLikeness, humanLikenessLabel } from '../game/humanlikeness';
 import { DRILLS, analyze, conclude, drillFor, habitIndex } from '../game/analysis';
 import MissionBoard from './MissionBoard';
 import type { Mission } from '../game/missions';
@@ -47,6 +48,7 @@ export default function LabScreen(p: Props) {
   const blocks = useMemo(() => analyze(raw), [raw]);
   const verdict = useMemo(() => conclude(blocks, raw), [blocks, raw]);
   const hIndex = useMemo(() => habitIndex(blocks, p.accuracy), [blocks, p.accuracy]);
+  const hl = useMemo(() => humanLikeness(shown, raw), [shown, raw]);
   const ranked = useMemo(() => {
     const all: AiFighter[] = ai ? [...leaguePool(ai), ai] : [...RIVALS];
     return all.sort((x, y) => y.rating - x.rating);
@@ -155,6 +157,50 @@ export default function LabScreen(p: Props) {
               generation={ai ? generation : undefined}
               power={ai?.power}
             />
+
+            {/* HUMAN-LIKENESS — 복제 AI가 얼마나 인간처럼 싸우는가 (arXiv 2108.03599) */}
+            <div className="mt-3 overflow-hidden rounded-lg border border-cyan-400/25 bg-cyan-500/[0.05]">
+              <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+                <span className="font-mono text-[10px] tracking-[0.25em] text-cyan-300/80">HUMAN-LIKENESS</span>
+                <span className="font-mono text-[10px] text-white/40">{humanLikenessLabel(hl)}</span>
+              </div>
+              <div className="p-3">
+                <div className="flex items-end justify-between">
+                  <div>
+                    <span className="font-mono text-3xl font-black text-white">{hl.score}</span>
+                    <span className="ml-1 font-mono text-[11px] text-white/35">/ 100</span>
+                  </div>
+                  <span className="font-mono text-[9.5px] text-white/35">
+                    신뢰도 {Math.round(hl.confidence * 100)}% · {raw.totalActs}행동
+                  </span>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-300 transition-[width] duration-500"
+                    style={{ width: `${hl.score}%` }}
+                  />
+                </div>
+                {!hl.enough && (
+                  <p className="mt-2 font-mono text-[10.5px] text-amber-300/80">
+                    ⚠ 데이터가 부족합니다. 최소 60개 이상의 행동이 필요합니다.
+                  </p>
+                )}
+                <div className="mt-2.5 grid gap-1.5 sm:grid-cols-2">
+                  {hl.parts.map((pt) => (
+                    <div key={pt.key} className="rounded-md border border-white/10 bg-black/25 px-2.5 py-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11.5px] font-bold text-white/80">{pt.kr}</span>
+                        <span className={`font-mono text-[11px] font-bold ${pt.score >= 60 ? 'text-emerald-300' : pt.score >= 40 ? 'text-amber-300' : 'text-rose-300'}`}>
+                          {pt.score}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[10.5px] leading-snug text-white/45">{pt.note}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             {ai && p.onShare && (
               <button
                 onClick={p.onShare}
