@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans KR", "Pretendard", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background: #04060d;
+}
+
+body {
+  margin: 0;
+  color: #e6edf7;
+  font-family: var(--font-sans);
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+canvas {
+  image-rendering: auto;
+  touch-action: none;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 190, 255, 0.25);
+  border-radius: 99px;
+}
+
+@keyframes glitch-shift {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-2px, 1px); }
+  50% { transform: translate(2px, -1px); }
+  75% { transform: translate(-1px, -2px); }
+}
+.animate-glitch {
+  animation: glitch-shift 0.18s infinite steps(2);
+}
