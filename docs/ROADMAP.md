@@ -139,6 +139,28 @@
 
 **검증 결과:** `tsc --noEmit` 0 에러 / `vitest run` **14/14 통과** / `npm run build` 성공 (dist/index.html 572.90 kB).
 
+### ✅ Phase 2 완료 — Shadow as a Service (섀도우 프로토콜 · 시즌 리그 · 재검증)
+
+| 작업 | 상태 | 위치 |
+|---|---|---|
+| **C-1** `ShadowPayload` — 업로드 직렬화 형식 + FNV 무결성 시그니처 (`shadowSig`/`shadowIntact` — 변조 감지) | ✅ | `src/game/shadow.ts` (신규) |
+| **C-2** `ShadowServer` 서버 인터페이스 + `LocalShadowServer` (localStorage 백엔드 — 실서버로 교체 가능한 계약) | ✅ | `src/game/shadow.ts` |
+| **C-2** `verifyMatch` — **서버 재검증 원형**: 같은 시드로 재시뮬 → winner/score/round 대조, 불일치 시 결과 폐기 | ✅ | `src/game/shadow.ts` |
+| **C-3** 시즌 시스템 — `SEASON` 상수 + `tierOf` (브론즈~GM 6티어) | ✅ | `src/game/shadow.ts` |
+| **C-3** `generateShadows` — 시드 하나로 24명 "커뮤니티 유저" 절차 생성 (8 아키타입 × 지터 ±14, rating 980~1920, 완전 결정론) | ✅ | `src/game/shadow.ts` |
+| **C-3** `pickOpponent` — 레이팅 평준 매칭 (쿼드러틱 근접 가중 룰렛, 시드 결정론, 제외 목록 지원) | ✅ | `src/game/shadow.ts` |
+| ghost.ts 재구성 — `runLeagueMatch`이 매 판 재검증(`verified` 필드), `runLeague` 평준 매칭, `leaguePool`에 시즌 섀도우 24명, 가짜 라이벌 이름 → 실제 로스터 섀도우로 교체 | ✅ | `src/game/ghost.ts` |
+| 업로드 연결 — `uploadGhost` 시 `serializeShadow` + `LocalShadowServer.upload` (영속화 `mnb.shadow.v1`) | ✅ | `src/App.tsx` |
+| UI — GHOST ACTIVITY 헤더에 시즌·티어 배지(S01 · 골드), 리그 로그에 재검증 ✓ 표시 | ✅ | `src/components/ModeHub.tsx` |
+| 테스트 14개 추가 → **총 28개 전부 통과** (결정론·무결성·재검증·티어 경계·평준 매칭) | ✅ | `src/game/shadow.test.ts` |
+
+**아키텍처 노트 (실서버 마이그레이션 경로):**
+- 서버가 붙으면 `ShadowServer` 인터페이스의 구현체만 교체하면 된다 (`upload`/`fetchPool`/`verify`).
+- `verifyMatch`는 서버 측에서 그대로 실행 가능 — `simulateMatch`가 시드 결정론이므로 서버는 시뮬레이터 재실행만으로 클라이언트 보고를 검증한다.
+- `generateShadows(SEASON.seed)`는 클라이언트·서버가 같은 시드만 공유하면 동일 로스터를 재현 → 리그 일관성.
+
+**검증 결과:** `tsc --noEmit` 0 에러 / `vitest run` **28/28 통과** / `npm run build` 성공 (dist/index.html 578.25 kB).
+
 ### Phase 0-A (결정론 코어) — 이전 완료 요약
 
 | 작업 | 상태 | 위치 |

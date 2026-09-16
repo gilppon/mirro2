@@ -39,6 +39,7 @@ import {
 import { STAGES } from './game/evolution';
 import { missionById, type Mission } from './game/missions';
 import Tutorial, { markTutorialDone, tutorialDone } from './components/Tutorial';
+import { LocalShadowServer, serializeShadow } from './game/shadow';
 
 type Screen = 'title' | 'lab' | 'train' | 'aimatch';
 
@@ -415,6 +416,9 @@ export default function App() {
   // ── Ghost Upload
   const uploadGhost = useCallback(() => {
     if (!save.ai) return;
+    // Phase 2: 섀도우 프로토콜로 업로드 — 무결성 시그니처 부여 + 로컬 서버에 영속화
+    const shadowSrv = new LocalShadowServer();
+    shadowSrv.upload(serializeShadow(save.ai));
     const g: GhostState = {
       uploaded: true, uploadedAt: Date.now(), version: ghost.version + 1,
       totalChallenges: ghost.totalChallenges, totalWins: ghost.totalWins, totalLosses: ghost.totalLosses,

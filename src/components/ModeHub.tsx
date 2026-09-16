@@ -1,6 +1,7 @@
 import { FLOORS } from '../game/dungeon';
 import { archLabel, type GhostState, type LeagueDigest } from '../game/ghost';
 import { ARCHETYPE_META } from '../game/dna';
+import { SEASON, tierOf } from '../game/shadow';
 import type { AiFighter } from '../game/meta';
 
 interface Props {
@@ -68,6 +69,12 @@ export default function ModeHub(p: Props) {
             <div className="flex items-center gap-2">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-fuchsia-400" />
               <span className="font-mono text-[10px] tracking-[0.3em] text-fuchsia-300/90">GHOST ACTIVITY</span>
+              <span
+                className="rounded-sm px-1.5 py-0.5 font-mono text-[8px] font-black tracking-widest"
+                style={{ background: `${tierOf(p.ai?.rating ?? 1200).color}26`, color: tierOf(p.ai?.rating ?? 1200).color }}
+              >
+                S{String(SEASON.n).padStart(2, '0')} · {tierOf(p.ai?.rating ?? 1200).kr}
+              </span>
             </div>
             <span className="font-mono text-[9px] text-white/30">
               업로드 v{p.ghost.version} · 누적 {p.ghost.totalWins}승 {p.ghost.totalLosses}패
@@ -129,6 +136,7 @@ export default function ModeHub(p: Props) {
                   <span className={`w-5 font-black ${l.win ? 'text-cyan-300' : 'text-rose-300'}`}>{l.win ? 'W' : 'L'}</span>
                   <span className="w-4">{l.oppFlag}</span>
                   <span className="min-w-0 flex-1 truncate text-white/60">{l.opp}</span>
+                  {l.verified && <span title="서버 재검증 통과" className="text-emerald-400/70">✓</span>}
                   <span className="text-white/35">{l.score}</span>
                   <span className={`w-9 text-right ${l.delta >= 0 ? 'text-cyan-300/70' : 'text-rose-300/70'}`}>
                     {l.delta >= 0 ? '+' : ''}{l.delta}

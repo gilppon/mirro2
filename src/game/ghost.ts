@@ -1,9 +1,11 @@
 // ─────────────────────────────────────────────────────────────
-//  GHOST UPLOAD & AI LEAGUE — 비동기 PvP 백본
+//  GHOST UPLOAD & AI LEAGUE — 비동기 PvP 백본 (Phase 2)
 //  동시접속자가 없어도 500개의 복제본이 항상 대기한다.
+//  Phase 2: 시즌 커뮤니티 섀도우 + 레이팅 평준 매칭 + 재시뮬 검증.
 // ─────────────────────────────────────────────────────────────
 import { RIVALS, simulateMatch, type AiFighter, type MatchResult } from './meta';
 import { ARCHETYPE_META } from './dna';
+import { generateShadows, pickOpponent, SEASON, toFighter, verifyMatch } from './shadow';
 
 export interface GhostState {
   uploaded: boolean;
@@ -26,6 +28,8 @@ export interface LeagueLog {
   /** 이 판에서 가장 많이 당한 공격 / 가장 잘 통한 습관 */
   tookFrom: string;
   wonBy: string;
+  /** 서버 재검증(재시뮬 대조) 통과 여부 — 통과한 결과만 랭킹에 반영된다 */
+  verified: boolean;
 }
 
 export interface LeagueDigest {
@@ -71,9 +75,11 @@ export function saveLogs(l: LeagueLog[]) {
   try { localStorage.setItem('mnb.league', JSON.stringify(l.slice(0, 40))); } catch { /* noop */ }
 }
 
-/** 실제 엔진으로 한 판 돌려 로그를 만든다 */
+/** 실제 엔진으로 한 판 돌린 뒤, 재시뮬로 검증까지 마친 로그를 만든다 */
 export function runLeagueMatch(me: AiFighter, opp: AiFighter, seed: number): { r: MatchResult; log: LeagueLog } {
   const r = simulateMatch(me, opp, seed);
+  // ── 서버 재검증 원형: 같은 시드로 다시 돌려 보고와 일치하는지 확인 (Phase 2)
+  const v = verifyMatch(me, opp, seed, r);
   const win = r.winner === 'a';
   return {
     r,
@@ -88,19 +94,23 @@ export function runLeagueMatch(me: AiFighter, opp: AiFighter, seed: number): { r
       at: Date.now(),
       tookFrom: pick(TOOK_POOL, seed + opp.name.length),
       wonBy: pick(WON_POOL, seed * 3 + me.name.length),
+      verified: v.ok,
     },
   };
 }
 
-/** 리그 일괄 시뮬레이션 → 다이제스트 */
+/** 리그 일괄 시뮬레이션 → 다이제스트 (레이팅 평준 매칭) */
 export function runLeague(me: AiFighter, pool: AiFighter[], count: number, seed: number): LeagueDigest {
   const logs: LeagueLog[] = [];
   let wins = 0, losses = 0, delta = 0, streak = 0, best = 0;
   const tookCount = new Map<string, number>();
   const wonCount = new Map<string, number>();
+  const excluded = new Set<string>();
 
   for (let i = 0; i < count; i++) {
-    const opp = pool[(seed + i * 5) % pool.length];
+    // ── 평준 매칭: 레이팅이 가까운 상대에 가중, 이미 만난 상대는 제외
+    const opp = pickOpponent(me, pool, seed + i * 7919, excluded);
+    excluded.add(opp.id);
     const { log } = runLeagueMatch(me, opp, seed + i * 977);
     logs.push(log);
     if (log.win) { wins++; streak++; best = Math.max(best, streak); }
@@ -116,9 +126,12 @@ export function runLeague(me: AiFighter, pool: AiFighter[], count: number, seed:
     return k;
   };
 
-  const names = ['AI-RIFT', 'AI-QUARTZ', 'AI-OBSIDIAN', 'AI-LUMEN', 'AI-VESPER', 'AI-HALO', 'AI-CINDER'];
-  const nCount = 1 + (seed % 3);
-  const newRivals = Array.from({ length: nCount }, (_, i) => names[(seed + i * 2) % names.length]);
+  // ── 신규 라이벌: 가짜 이름이 아니라 시즌 로스터의 실제 섀도우
+  const season = generateShadows(SEASON.seed ^ seed, 24);
+  const newRivals = season
+    .filter((s) => !logs.some((l) => l.opp === s.name))
+    .slice(0, 1 + (seed % 3))
+    .map((s) => s.name);
 
   return {
     todayChallenges: count,
@@ -128,11 +141,11 @@ export function runLeague(me: AiFighter, pool: AiFighter[], count: number, seed:
     strongestHabit: topOf(wonCount, '점프 유도 후 대공'),
     streak: best,
     logs,
-    newRivals: [...new Set(newRivals)],
+    newRivals,
   };
 }
 
-/** 리그 풀: 기본 라이벌 + 친구 고스트(로컬 생성) */
+/** 리그 풀: 기본 라이벌 + 친구 고스트 + 시즌 커뮤니티 섀도우 (Phase 2) */
 export function leaguePool(me: AiFighter | null): AiFighter[] {
   const pool = [...RIVALS];
   if (me) {
@@ -153,6 +166,10 @@ export function leaguePool(me: AiFighter | null): AiFighter[] {
         rating: Math.max(950, me.rating + s * 60),
       });
     }
+  }
+  // ── 시즌 커뮤니티 섀도우: 시드만 공유되면 서버·클라이언트가 같은 24명을 본다
+  for (const p of generateShadows(SEASON.seed, 24)) {
+    pool.push(toFighter(p));
   }
   return pool;
 }
