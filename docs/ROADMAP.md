@@ -60,3 +60,56 @@
 | 파티클/텍스트/트레일 | 순수 객체 배열 | ✅ 프레젠테이션 전용(상태 제외) |
 
 **결론: `Map` 4개만 처리하면 `Engine + DnaBot + Brain` 전체가 스냅샷 가능한 순수 데이터 덩어리다.**
+
+---
+
+## Part 2. 7대 고도화 전략 (요약)
+
+| 전략 | 내용 | 공수 | 순서 |
+|---|---|---|---|
+| **A. 결정론 코어** | 난수/시계 DI, 스냅샷/복원, 체크섬, 회귀 테스트 | 3~5일 | **Phase 0 (전제)** |
+| **B. 실시간 온라인** | WebRTC DataChannel + 롤백(GGPO 방식), 클럭 동기화 | 3~5주 | Phase 3 |
+| **C. Shadow as a Service** | 실사람 AI 섀도우 리그, 서버 재검증, 진짜 오프라인 다이제스트 | 4~7주 | Phase 2 |
+| **D. 학습 품질** | 다차원 난이도(같은 LV·복수 아키타입), 2-에이전트, humanLikeness 지표 | 2~3주 | Phase 1 |
+| **E. 온보딩/리텐션** | 220샘플 게이지 서사화, 튜토리얼 3단계, 재방문 훅 3종 | 2~3주 | Phase 1 |
+| **F. 수익화/공정성** | cosmetic 강제 테스트, 시즌 패스, FAIR_PLAY 문명화 | 1~2주 | Phase 4 |
+| **G. 품질 인프라** | git, vitest, 결정론 테스트, 문서 | 1주 | **Phase 0** |
+
+**안티패턴 금지:** 승률 기반 난이도 조작(역-학습 정체성 붕괴) / Pay-to-Win / 서버 재검증 없는 P2P 랭킹 / 롤백 전 지연기반 넷코드 출시.
+
+---
+
+## Part 3. 구현 상태 (2026-09-16 업데이트)
+
+### ✅ Phase 0-A 완료 — 결정론 코어
+
+| 작업 | 상태 | 위치 |
+|---|---|---|
+| 공용 결정론 RNG 모듈 (xorshift32, 시드 믹싱, FNV 해시, 양자화) | ✅ | `src/game/rng.ts` |
+| `DnaBot` → 공용 `Rng`로 승격 | ✅ | `src/game/dnaBot.ts` |
+| Engine 난수 주입 — `Math.random()` 7곳 → `this.rng()` | ✅ | `src/game/engine.ts` |
+| Engine 시계 주입 — `performance.now()` 3곳 → `this.now()` | ✅ | `src/game/engine.ts` |
+| Brain 난수 주입 — `Math.random()` 17곳 → `this.rng()` | ✅ | `src/game/brain.ts` |
+| `Engine.setDeterminism(seed)` — 시드 RNG(Rng 인스턴스) + 고정 시계 주입, brain.rng 공유 | ✅ | `src/game/engine.ts` |
+| `Engine.snapshot()/restore()` — Map/Set 포함 deepClone, **RNG 내부 상태까지 캡처** | ✅ | `engine.ts` + `src/game/snapshot.ts` |
+| `Engine.checksum()` — 디싱크 감지용 양자화 해시 | ✅ | `src/game/engine.ts` |
+| `simulateMatch` 시드 주입 (`eng.setDeterminism(seed)`) | ✅ | `src/game/meta.ts` |
+| 결정론 회귀 테스트 **8개 전부 통과** | ✅ | `src/game/determinism.test.ts` |
+| git 저장소 초기화 + Phase 0-A 커밋 (`7b5ee11`) | ✅ | `.git/` |
+
+**검증 결과:**
+- `tsc --noEmit` → **0 에러**
+- `vitest run` → **8/8 통과** (같은 시드 → 같은 경기 / 다른 시드 각각 재현 / 스냅샷→복원→재시뮬→체크섬 일치 / Rng 상태 저장·복원 / deepClone Map 보존·함수 제외)
+- `npm run build` → **성공** (dist/index.html 559.41 kB, 69 modules)
+
+**설계 원칙 (준수됨):**
+- 기본값은 기존 동작 그대로(`Math.random`/`performance.now`) — 실전 플레이 감성 무변경.
+- 결정론은 `setDeterminism()`을 호출한 시뮬레이션에만 적용.
+- 전투 타이밍 로직은 건드리지 않고 난수 소스만 교체.
+
+### 다음 단계 (Phase 0 잔여 → Phase 1)
+
+1. ~~`git init`~~ ✅ / ~~vitest~~ ✅ / ~~결정론~~ ✅
+2. Phase 1: 다차원 난이도(D-1, evolution.ts에 아키타입 variant 축), `humanLikeness()` 지표(D-3), 튜토리얼 3단계(E-3)
+3. Phase 2: 섀도우 서버(C-1~C-3) — `simulateMatch`의 시드 재현성이 서버 재검증의 기반이 됨 (이번에 확보됨)
+4. Phase 3: 롤백 넷코드(B) — `snapshot()/restore()/checksum()`이 이미 준비됨 (이번에 확보됨)
