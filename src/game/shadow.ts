@@ -155,6 +155,75 @@ export function tierOf(rating: number): { kr: string; en: string; color: string 
   return TIERS[TIERS.length - 1];
 }
 
+// ── 시즌 보상 (Phase 4 C-4): 티어별 획득 코스메틱 ──
+// 모든 보상은 cosmetic=true(전투 영향 없음)이어야 한다.
+export interface SeasonReward {
+  /** 보상 아이템 ID (store.ts CATALOG의 id와 매칭) */
+  itemId: string;
+  /** 보상 이름 (UI용) */
+  name: string;
+  /** 이 보상을 잠그는 최소 티어 인덱스 (0=브론즈 ~ 5=GM) */
+  tierIndex: number;
+}
+
+export const SEASON_REWARDS: SeasonReward[] = [
+  { itemId: 'skin.crimson',  name: 'CRIMSON',       tierIndex: 1 }, // 실버
+  { itemId: 'skin.aurora',   name: 'AURORA',        tierIndex: 2 }, // 골드
+  { itemId: 'skin.void',     name: 'VOID',          tierIndex: 3 }, // 플래티넘
+  { itemId: 'hud.amber',     name: 'AMBER CRT',     tierIndex: 2 }, // 골드
+  { itemId: 'hud.mono',      name: 'MONOCHROME',    tierIndex: 3 }, // 플래티넘
+  { itemId: 'fx.glitch',     name: 'DATA SHARD',    tierIndex: 4 }, // 다이아
+  { itemId: 'skin.mercury',  name: 'MERCURY',       tierIndex: 0 }, // 브론즈 (무료, 첫 등급 달성 시)
+];
+
+/** rating에 따라 시즌 보상 목록을 반환 (티어 인덱스 기준) */
+export function seasonRewards(rating: number): SeasonReward[] {
+    // TIERS는 높은 것부터 정렬 (GM=0, BRONZE=5). findIndex 0=GM →
+  // tierIndex(0=BRONZE, 5=GM)로 뒤집어 매핑.
+  const found = TIERS.findIndex((t) => rating >= t.min);
+  const tierIndex = TIERS.length - 1 - found;
+  return SEASON_REWARDS.filter((r) => r.tierIndex <= tierIndex);
+}
+
+// ── 섀도우 공유 URL (Phase 4 C-5): "내 AI에게 도전해보세요" ──
+// 브라우저 환경에서는 btoa/atob이 전역으로 제공됨. Unicode(이모지) 처리를 위해 TextEncoder 사용.
+function b64encode(s: string): string {
+  try {
+    const binary = String.fromCharCode(...Array.from(new TextEncoder().encode(s)));
+    return btoa(binary);
+  } catch {
+    return Buffer.from(s, 'utf8').toString('base64');
+  }
+}
+function b64decode(s: string): string {
+  try {
+    const binary = atob(s);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return Buffer.from(s, 'base64').toString('utf8');
+  }
+}
+
+/** ShadowPayload를 짧은 URL 파라미터 문자열로 인코딩 (base64, URL-safe) */
+export function encodeShadowUrl(p: ShadowPayload): string {
+  const { sig: _, ...rest } = p;                // Omit<ShadowPayload, 'sig'>
+  const safe = shadowIntact(p) ? p : { ...rest, sig: shadowSig(rest) };
+  return b64encode(JSON.stringify(safe)).replace(/[+/=]/g, (m) => ({ '+': '-', '/': '_', '=': '' })[m]!);
+}
+
+/** URL 파라미터 문자열에서 ShadowPayload 디코딩 */
+export function decodeShadowUrl(s: string): ShadowPayload | null {
+  try {
+    const fixed = s.replace(/-/g, '+').replace(/_/g, '/');
+    const json = b64decode(fixed);
+    const p = JSON.parse(json) as ShadowPayload;
+    return p;
+  } catch {
+    return null;
+  }
+}
+
 // ── 절차적 커뮤니티: 시드 하나가 24명의 "다른 유저들"을 재현한다 ──
 const OWNERS = [
   'Kaito', 'Yuna', 'Minseo', 'Alex', 'Noor', 'Bruno', 'Wen', 'Eva', 'Omar', 'Sora',
