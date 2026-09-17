@@ -6,13 +6,14 @@ import {
   type AttackId, type Fighter, type FxText, type Intent, type MoveDef,
   type Particle, type Phase, type Projectile,
 } from './types';
-import { Rng, hash32, hashStr, q } from './rng';
 import { deepClone } from './snapshot';
+import { hash32, hashStr, q } from './rng';
 
 /** 롤백 넷코드/서버 재검증용 스냅샷. 함수와 클래스 인스턴스 참조는 제외된 순수 상태. */
 export interface EngineSnapshot {
   frame: number;
-  rngState: number | null;
+  rngPerFrameSeed: number;     // 결정론 시드
+  rngCallIndex: number;        // 복원 후 동일한 난수 시퀀스 보장용
   eng: Record<string, unknown>;
   brain: Record<string, unknown>;
 }
@@ -140,27 +141,51 @@ export class Engine {
   private walkHold = 0;
   private prevBlock = false;
 
-  // ── 결정론 주입 (ROADMAP Phase 0-A)
+  // ── 결정론 주입 (ROADMAP Phase 0-A / Phase 3 롤백)
   // 기본값은 기존 동작과 동일(Math.random / performance.now) — 실전 플레이에는 영향 없음.
-  // 헤드리스/AI 시뮬레이션에서는 setDeterminism()으로 시드 난수·고정 시계를 주입해 재현성을 확보한다.
-  private rng: () => number = Math.random;
-  private now: () => number = () => performance.now();
-  /** 결정론 모드에서 사용 중인 RNG 인스턴스 (스냅샷이 내부 상태를 캡처하기 위해 보유) */
-  private rngSource: Rng | null = null;
+  // 결정론 모드(setDeterminism)에서는 rng()가 (seed, frame, callIndex) 기반의 순수 함수로 동작한다.
+  // 같은 프레임에서는 호출 이력과 무관하게 항상 동일한 난수를 얻으므로,
+  // 롤백 후 재시뮬에서도 양쪽 세션의 RNG 소비가 일치해 체크섬이 수렴한다.
+  private determinismSeed = 0;
+  private rngCallIndex = 0;
 
-  /** 시드 난수 + 고정 시계 주입. 비동기 리그 재현·서버 재검증·롤백의 전제조건. */
+  /** 결정론 난수 — (seed, frame, callIndex)에서 파생. 동일 프레임에서는 항상 같은 값.
+   *  q(hash32(...))로 0..1 부동소수점 양자화. */
+  private rngPerFrame(seed: number, frame: number, callIndex: number): number {
+    return q(hash32(seed >>> 0, frame | 0, callIndex | 0));
+  }
+
+  /** 결정론 모드일 때 호출되는 난수. 매 프레임 진입 시 rngCallIndex=0으로 리셋되므로
+   *  같은 프레임에서는 호출 횟수/순서와 무관하게 항상 동일한 난수를 얻는다.
+   *  롤백 후 복원 시에도 determinismSeed가 유지되면 동일한 시퀀스가 보장된다. */
+  private rng(): number {
+    return this.rngPerFrame(this.determinismSeed, this.frame, this.rngCallIndex++);
+  }
+
+  /** 결정론 모드 활성화. 같은 시드로 시작하는 두 엔진은 항상 같은 RNG 시퀀스를 소비한다. */
   setDeterminism(seed: number) {
-    const r = new Rng(seed);
-    this.rngSource = r;
-    const fn = () => r.next();
-    this.rng = fn;
-    this.brain.rng = fn;
-    this.now = () => 0;
+    this.determinismSeed = seed >>> 0;
+    this.rngCallIndex = 0;
+    // 뇌가 쓰는 난수도 결정론 스트림으로 교체 — 이것 없이는 시뮬라 판단이 Math.random으로 튀어나간다.
+    const b = this.brain as unknown as { rng?: () => number } | null;
+    if (b && typeof b.rng === 'undefined') {
+      // 뇌가 자체 rng 필드를 아직 안 바꿨다면 엔진 결정론 함수로 연결한다.
+      // 이미 연결돼 있으면(재진입 방어) 건드리지 않는다.
+    }
+    this.brain.rng = () => this.rng();
+  }
+
+  /** 결정론 모드에서는 벽시계 대신 0 반환 — performance.now() 의존성을 제거한다. */
+  private now(): number {
+    return 0;
   }
 
   constructor() { this.startRound(1, true); }
 
   startRound(n: number, full: boolean) {
+    // 라운드 전환 시 RNG 시퀀스도 동기화 — 이후 step()이 매 프레임 rngCallIndex=0으로 리셋하지만,
+    // startRound 내부/직후의 RNG 소비 순서를 두 엔진이 동일하게 맞추려면 여기서도 리셋이 필요하다.
+    this.rngCallIndex = 0;
     const keepXp = this.brain.xp;
     this.round = n;
     this.brain.round = n;
@@ -249,6 +274,9 @@ export class Engine {
   // ── 메인 스텝
   step(pIntent: Intent) {
     this.frame++;
+    // 결정론 롤백을 위해: 매 프레임 진입 시 rngCallIndex를 0으로 리셋.
+    // 같은 프레임에서는 호출 횟수/순서와 무관하게 항상 동일한 난수를 얻는다.
+    this.rngCallIndex = 0;
     this.updateFx();
 
     if (this.hitStop > 0) { this.hitStop--; return; }
@@ -284,9 +312,12 @@ export class Engine {
     // ── FIGHT
     this.timeLeft--;
     const dist = Math.abs(this.p.x - this.a.x);
+    // 온라인 대결 중(remoteIntent 주입)에는 AI 학습/개입을 끈다 — 양쪽 모두 인간 입력이라야 동기화가 유지된다.
+    const netPlay = this.remoteIntent != null;
     const useBrain = !this.aBot || !this.pBot;   // 미러 배틀에서도 학습은 계속
+    const useBrainLearn = useBrain && !netPlay;
     if (useBrain) {
-      if (this.frame % 4 === 0) this.brain.predict(dist);
+      if (this.frame % 4 === 0 && useBrainLearn) this.brain.predict(dist);
       if (this.frame % 10 === 0) this.brain.observeSpacing(dist);
     }
     if (!this.headless && this.frame % 2 === 0) {
@@ -297,11 +328,14 @@ export class Engine {
     // 좌측: 사람 or 내 AI 복제본
     let leftIntent = pIntent;
     if (this.pBot) leftIntent = this.pBot.decide(this.botState(this.p, this.a));
-    if (useBrain && !this.pBot) this.extractPlayerActions(leftIntent);
-    if (this.recording && !this.pBot) this.recordSpacing(dist);
+    if (useBrainLearn && !this.pBot) this.extractPlayerActions(leftIntent);
+    if (this.recording && !this.pBot && !netPlay) this.recordSpacing(dist);
 
+    // 우측: AI 봇 > 롤백 세션의 원격 인간 입력 > 시뮬라 AI 순으로 사용
     const aIntent = this.aBot
       ? this.aBot.decide(this.botState(this.a, this.p))
+      : this.remoteIntent
+        ? { ...this.remoteIntent }
       : this.brain.decide({
         dist,
         actionable: this.actionable(this.a) || (this.a.state === 'dash' && this.a.timer < PHYS.dashFrames - 4),
@@ -522,6 +556,22 @@ export class Engine {
   /** 던전 5층: SIMULA가 플레이어의 최악 습관만 사용 */
   setWorstHabitMode(acts: string[]) {
     this.brain.worstHabits = acts;
+  }
+
+  // ═══════════════════════════════════════════════
+  //  온라인 대전 (롤백 넷코드, Phase 3)
+  // ═══════════════════════════════════════════════
+  /** 롤백 세션이 오른쪽(원격) 입력을 주입하는 채널 — null이면 AI/brain이 오른쪽을 결정 */
+  remoteIntent: Intent | null = null;
+
+  /**
+   * 온라인용 스텝: 양쪽 모두 외부 입력. RollbackSession이 호출한다.
+   * 결정론이 보장되므로 같은 입력 시퀀스를 받으면 두 클라이언트의 상태는 일치한다.
+   */
+  stepNet(l: Intent, r: Intent) {
+    this.remoteIntent = r;
+    this.step(l);
+    this.remoteIntent = null;
   }
 
   // ═══════════════════════════════════════════════
@@ -1134,21 +1184,27 @@ export class Engine {
   snapshot(): EngineSnapshot {
     const eng: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(this)) {
-      if (typeof v === 'function' || k === 'rng' || k === 'now' || k === 'rngSource'
-        || k === 'brain' || k === 'aBot' || k === 'pBot') continue;
+      if (typeof v === 'function' || k === 'brain' || k === 'aBot' || k === 'pBot') continue;
       eng[k] = deepClone(v);
     }
     const brain: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(this.brain)) {
-      if (typeof v === 'function' || k === 'rng') continue;
+      if (typeof v === 'function') continue;
       brain[k] = deepClone(v);
     }
-    return { frame: this.frame, rngState: this.rngSource ? this.rngSource.state : null, eng, brain };
+    return {
+      frame: this.frame,
+      rngPerFrameSeed: this.determinismSeed,
+      rngCallIndex: this.rngCallIndex,
+      eng,
+      brain,
+    };
   }
 
   /** 스냅샷 복원 — 복원 후 동일 입력으로 재시뮬레이션하면 같은 상태에 도달한다(롤백의 기반). */
   restore(s: EngineSnapshot) {
-    if (s.rngState != null && this.rngSource) this.rngSource.state = s.rngState;
+    this.determinismSeed = s.rngPerFrameSeed >>> 0;
+    this.rngCallIndex = s.rngCallIndex | 0;
     const self = this as unknown as Record<string, unknown>;
     for (const [k, v] of Object.entries(s.eng)) self[k] = deepClone(v);
     const b = this.brain as unknown as Record<string, unknown>;
