@@ -112,11 +112,34 @@
 1. ~~`git init`~~ ✅ / ~~vitest~~ ✅ / ~~결정론~~ ✅
 2. Phase 1: 다차원 난이도(D-1, evolution.ts에 아키타입 variant 축), `humanLikeness()` 지표(D-3), 튜토리얼 3단계(E-3)
 3. Phase 2: 섀도우 서버(C-1~C-3) — `simulateMatch`의 시드 재현성이 서버 재검증의 기반이 됨 (이번에 확보됨)
-4. Phase 3: 롤백 넷코드(B) — `snapshot()/restore()/checksum()`이 이미 준비됨 (이번에 확보됨)
+4. Phase 3: 롤백 넷코드(B) — ✅ 완료 (`src/game/rollback.ts`, `src/net/transport.ts`, `src/net/clock.ts`, `rollback.test.ts`)
 
 ---
 
-## Part 4. 구현 상태 (2026-09-16, 2차 업데이트)
+## Part 4. 구현 상태 (2026-09-16, 3차 업데이트)
+
+### ✅ Phase 3 완료 — Rollback Netcode Core (GGPO 방식 롤백 넷코드)
+
+| 작업 | 상태 | 위치 |
+|---|---|---|
+| `rollback.ts` — `RollbackSession` (GGPO 방식: 로컬 즉시 적용 / 원격 예측 / 불일치 시 롤백+재시뮬) | ✅ | `src/game/rollback.ts` (신규) |
+| `step()` 프레임 진입 시 `rngCallIndex=0` 리셋 (프레임 기반 결정론 난수) | ✅ | `src/game/engine.ts` |
+| `setDeterminism(seed)`에서 `brain.rng` 결정론 함수로 교체 | ✅ | `src/game/engine.ts` |
+| `snapshot()`/`restore()`에 `determinismSeed` + `rngCallIndex` 보존/복원 | ✅ | `src/game/engine.ts` |
+| `stepNet(l, r)` — 온라인 2인간 입력 스텝 (rollback 세션 전용) | ✅ | `src/game/engine.ts` |
+| `checksum()` — 디싱크 감지용 양자화 해시 (frame, hp, position, round, combos) | ✅ | `src/game/engine.ts` |
+| `transport.ts` — `LoopbackTransport` (결정론적 drop 기본값) + `NetTransport` 인터페이스 | ✅ | `src/net/transport.ts` (신규) |
+| `clock.ts` — `FramePacer` (리드 상한 강제 → SFV식 "한쪽만 롤백" 방지) | ✅ | `src/net/clock.ts` (신규) |
+| 롤백 테스트 4개 (무지연 체크섬 일치 / 지연 3프레임 롤백+수렴 / 손실 5% 수렴 / FramePacer) | ✅ | `src/game/rollback.test.ts` (신규) |
+
+**핵심 수정 (rollback.test.ts 실패 해결):**
+1. `RollbackSession.tick()`에 `this.frame++` 추가 — 누락으로 인해 세션 프레임이 0에서 멈춰 롤백이 전혀 발생하지 않던 버그 수정
+2. `rollbackTo()`에서 `targetFrame`을 `restore` 전에 캡처 + 재시뮬 중 스냅샷 갱신 + stale 스냅샷 삭제 — 재시뮬 정확도 및 RNG 소비량 일치 보장
+3. `LoopbackTransport.drop` 기본값을 `Math.random` → `() => 1` (결정론적, 테스트 재현성)
+
+**검증 결과:** `tsc --noEmit` 0 에러 / `vitest run` **32/32 통과** (결정론 8 + humanLikeness 6 + shadow 14 + rollback 4) / `npm run build` 성공 (dist/index.html 578.58 kB, gzip 165.05 kB)
+
+### Phase 0-A (결정론 코어) — 이전 완료 요약
 
 ### ✅ Phase 1 완료 — D-1 다차원 난이도 · D-3 humanLikeness · E-3 튜토리얼
 
@@ -159,7 +182,7 @@
 - `verifyMatch`는 서버 측에서 그대로 실행 가능 — `simulateMatch`가 시드 결정론이므로 서버는 시뮬레이터 재실행만으로 클라이언트 보고를 검증한다.
 - `generateShadows(SEASON.seed)`는 클라이언트·서버가 같은 시드만 공유하면 동일 로스터를 재현 → 리그 일관성.
 
-**검증 결과:** `tsc --noEmit` 0 에러 / `vitest run` **28/28 통과** / `npm run build` 성공 (dist/index.html 578.25 kB).
+**검증 결과 (Phase 3 완료 기준):** `tsc --noEmit` 0 에러 / `vitest run` **32/32 통과** (결정론 8 + humanLikeness 6 + shadow 14 + rollback 4) / `npm run build` 성공 (dist/index.html 578.58 kB, gzip 165.05 kB)
 
 ### Phase 0-A (결정론 코어) — 이전 완료 요약
 
