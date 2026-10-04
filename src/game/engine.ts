@@ -148,6 +148,7 @@ export class Engine {
   // 롤백 후 재시뮬에서도 양쪽 세션의 RNG 소비가 일치해 체크섬이 수렴한다.
   private determinismSeed = 0;
   private rngCallIndex = 0;
+  private fxCallIndex = 0;
 
   /** 결정론 난수 — (seed, frame, callIndex)에서 파생. 동일 프레임에서는 항상 같은 값.
    *  q(hash32(...))로 0..1 부동소수점 양자화. */
@@ -162,10 +163,16 @@ export class Engine {
     return this.rngPerFrame(this.determinismSeed, this.frame, this.rngCallIndex++);
   }
 
+  /** 연출 전용 스트림 — 전투 RNG 오염 방지. headless on/off와 무관하게 전투 인덱스 안정. */
+  private rngFx(): number {
+    return this.rngPerFrame((this.determinismSeed ^ 0x9e3779b9) >>> 0, this.frame, this.fxCallIndex++);
+  }
+
   /** 결정론 모드 활성화. 같은 시드로 시작하는 두 엔진은 항상 같은 RNG 시퀀스를 소비한다. */
   setDeterminism(seed: number) {
     this.determinismSeed = seed >>> 0;
     this.rngCallIndex = 0;
+    this.fxCallIndex = 0;
     // 뇌가 쓰는 난수도 결정론 스트림으로 교체 — 이것 없이는 시뮬라 판단이 Math.random으로 튀어나간다.
     const b = this.brain as unknown as { rng?: () => number } | null;
     if (b && typeof b.rng === 'undefined') {
@@ -186,6 +193,7 @@ export class Engine {
     // 라운드 전환 시 RNG 시퀀스도 동기화 — 이후 step()이 매 프레임 rngCallIndex=0으로 리셋하지만,
     // startRound 내부/직후의 RNG 소비 순서를 두 엔진이 동일하게 맞추려면 여기서도 리셋이 필요하다.
     this.rngCallIndex = 0;
+    this.fxCallIndex = 0;
     const keepXp = this.brain.xp;
     this.round = n;
     this.brain.round = n;
@@ -261,12 +269,12 @@ export class Engine {
   spawnParticles(x: number, y: number, n: number, color: string, kind: Particle['kind'] = 'spark', power = 1) {
     if (this.headless) return;
     for (let i = 0; i < n; i++) {
-      const ang = this.rng() * Math.PI * 2;
-      const sp = (1.5 + this.rng() * 6) * power;
+      const ang = this.rngFx() * Math.PI * 2;
+      const sp = (1.5 + this.rngFx() * 6) * power;
       this.particles.push({
         x, y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 1.4,
-        life: 24 + this.rng() * 26, maxLife: 50,
-        color, size: 1.6 + this.rng() * 3.4, kind,
+        life: 24 + this.rngFx() * 26, maxLife: 50,
+        color, size: 1.6 + this.rngFx() * 3.4, kind,
       });
     }
   }
@@ -277,6 +285,7 @@ export class Engine {
     // 결정론 롤백을 위해: 매 프레임 진입 시 rngCallIndex를 0으로 리셋.
     // 같은 프레임에서는 호출 횟수/순서와 무관하게 항상 동일한 난수를 얻는다.
     this.rngCallIndex = 0;
+    this.fxCallIndex = 0;
     this.updateFx();
 
     if (this.hitStop > 0) { this.hitStop--; return; }

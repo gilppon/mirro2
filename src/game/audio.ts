@@ -1,6 +1,7 @@
 // 초경량 WebAudio 신스 — 타격/가드/미러 사운드
 export class Sfx {
   private ctx: AudioContext | null = null;
+  private noiseBuf: AudioBuffer | null = null;
   enabled = true;
 
   private ac(): AudioContext | null {
@@ -31,18 +32,26 @@ export class Sfx {
   private noise(dur: number, gain: number, hp = 900) {
     const ac = this.ac();
     if (!ac) return;
-    const len = Math.floor(ac.sampleRate * dur);
-    const buf = ac.createBuffer(1, len, ac.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    // 1초 노이즈 1회 생성 후 재사용 — 매타격 할당 제거
+    if (!this.noiseBuf || this.noiseBuf.sampleRate !== ac.sampleRate) {
+      const len = ac.sampleRate * 1;
+      const buf = ac.createBuffer(1, len, ac.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      this.noiseBuf = buf;
+    }
     const src = ac.createBufferSource();
-    src.buffer = buf;
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = Math.max(0.5, Math.min(2, dur * 4));
     const f = ac.createBiquadFilter();
     f.type = 'highpass'; f.frequency.value = hp;
     const g = ac.createGain();
-    g.gain.value = gain;
+    const t = ac.currentTime;
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
     src.connect(f); f.connect(g); g.connect(ac.destination);
-    src.start();
+    src.start(t);
+    src.stop(t + dur + 0.02);
   }
 
   swing() { this.noise(0.08, 0.05, 1800); }

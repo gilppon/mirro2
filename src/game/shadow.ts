@@ -188,21 +188,13 @@ export function seasonRewards(rating: number): SeasonReward[] {
 // ── 섀도우 공유 URL (Phase 4 C-5): "내 AI에게 도전해보세요" ──
 // 브라우저 환경에서는 btoa/atob이 전역으로 제공됨. Unicode(이모지) 처리를 위해 TextEncoder 사용.
 function b64encode(s: string): string {
-  try {
-    const binary = String.fromCharCode(...Array.from(new TextEncoder().encode(s)));
-    return btoa(binary);
-  } catch {
-    return Buffer.from(s, 'utf8').toString('base64');
-  }
+  const binary = String.fromCharCode(...Array.from(new TextEncoder().encode(s)));
+  return btoa(binary);
 }
 function b64decode(s: string): string {
-  try {
-    const binary = atob(s);
-    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return Buffer.from(s, 'base64').toString('utf8');
-  }
+  const binary = atob(s);
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 /** ShadowPayload를 짧은 URL 파라미터 문자열로 인코딩 (base64, URL-safe) */
@@ -288,8 +280,9 @@ export function generateShadows(seasonSeed: number, count = 24): ShadowPayload[]
 // ─────────────────────────────────────────────────────────────
 
 export function pickOpponent(me: { rating: number }, pool: AiFighter[], seed: number, exclude: Set<string> = new Set()): AiFighter {
+  if (!pool.length) throw new Error("empty opponent pool");
   const cands = pool.filter((p) => !exclude.has(p.id));
-  if (!cands.length) return pool[Math.abs(seed) % pool.length];
+  if (!cands.length) return pool[((Math.abs(seed) % pool.length) + pool.length) % pool.length];
   // 근접 가중(쿼드러틱 감쇠): rating 차 0 → 가중 1, 360 → 0.2, 720+ → ~0
   const weights = cands.map((p) => {
     const d = Math.abs(p.rating - me.rating) / 180;

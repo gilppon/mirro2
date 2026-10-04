@@ -2,3 +2,9 @@ node_modules/
 dist/
 *.local
 .DS_Store
+
+# agent worktrees (local metadata, restore reference only)
+.kilo/
+
+# one-off helper scripts
+tmp_*.js

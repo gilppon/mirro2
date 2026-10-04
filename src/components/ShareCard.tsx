@@ -50,13 +50,13 @@ export default function ShareCard(p: Props) {
     }).catch(() => { /* noop */ });
   }, [shareText]);
 
-  // SVG → PNG 내보내기 (외부 의존 없이)
-  const download = useCallback(() => {
+  // SVG → PNG 내보내기 (외부 의존 없이). 공유/저장이 같은 캔버스를 재사용.
+  const renderCard = useCallback(() => {
     const W = 1200, H = 630;
     const cv = document.createElement('canvas');
     cv.width = W; cv.height = H;
     const c = cv.getContext('2d');
-    if (!c) return;
+    if (!c) return null;
     const g = c.createLinearGradient(0, 0, W, H);
     g.addColorStop(0, '#0a1128'); g.addColorStop(0.6, '#1a0a24'); g.addColorStop(1, '#04060d');
     c.fillStyle = g; c.fillRect(0, 0, W, H);
@@ -119,14 +119,37 @@ export default function ShareCard(p: Props) {
     c.textAlign = 'right';
     c.fillText('#MirrorNeuralBrawler', W - 62, H - 40);
 
+    return cv;
+  }, [arch, meta, p, core, traits, readRate]);
+
+  const download = useCallback(() => {
+    const cv = renderCard();
+    if (!cv) return;
     cv.toBlob((b) => {
       if (!b) return;
       const url = URL.createObjectURL(b);
       const a = document.createElement('a');
       a.href = url; a.download = `${p.name}-combat-dna.png`; a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
     });
-  }, [arch, meta, p, core, traits, readRate]);
+  }, [renderCard, p]);
+
+  // 모바일 바이럴 루프: Web Share API 파일 공유 → 텍스트 공유 순 폴백
+  const canNativeShare = typeof navigator !== 'undefined' && 'share' in navigator;
+  const share = useCallback(() => {
+    const cv = renderCard();
+    if (!cv) return;
+    cv.toBlob((b) => {
+      const file = b ? [new File([b], `${p.name}-combat-dna.png`, { type: 'image/png' })] : [];
+      const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+      if (file.length && nav.canShare?.({ files: file })) {
+        nav.share({ files: file, title: 'Combat DNA', text: shareText }).catch(() => { /* dismissed */ });
+      } else if ('share' in navigator) {
+        (navigator as Navigator & { share: (d: { title: string; text: string }) => Promise<void> })
+          .share({ title: 'Combat DNA', text: shareText }).catch(() => { /* dismissed */ });
+      }
+    });
+  }, [renderCard, p, shareText]);
 
   return (
     <div className="fixed inset-0 z-[58] overflow-y-auto bg-black/93 p-4 backdrop-blur-sm">
@@ -229,6 +252,11 @@ export default function ShareCard(p: Props) {
           <button onClick={download} className="flex-1 rounded-md border border-cyan-300/50 bg-cyan-400/15 py-2.5 font-mono text-xs font-bold tracking-[0.2em] text-cyan-100 transition hover:bg-cyan-400/25">
             ⤓ PNG 저장 (1200×630)
           </button>
+          {canNativeShare && (
+            <button onClick={share} className="flex-1 rounded-md border border-fuchsia-400/50 bg-fuchsia-500/15 py-2.5 font-mono text-xs font-bold tracking-[0.2em] text-fuchsia-100 transition hover:bg-fuchsia-500/25">
+              ↗ 공유하기
+            </button>
+          )}
           <button onClick={copy} className="flex-1 rounded-md border border-white/20 py-2.5 font-mono text-xs tracking-[0.2em] text-white/70 transition hover:bg-white/10">
             {copied ? '✓ 복사됨' : '⧉ 텍스트 복사'}
           </button>

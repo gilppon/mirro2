@@ -75,6 +75,20 @@ export interface GameSnapshot {
   worstStreak: number;
 }
 
+/** HUD 스냅샷 더티체크 키 — 스칼라만으로 구성해 할당 없이 비교. 중립 상황 리렌더 제거. */
+function snapKey(eng: Engine): string {
+  const r = eng.run;
+  const mission = r ? `${r.mission.id}|${r.failed ? 1 : 0}|${r.cleared ? 1 : 0}|${r.states.map((s) => `${s.ok ? 1 : 0}:${s.count}`).join(",")}` : "-";
+  return [
+    eng.phase, eng.round, eng.wins[0], eng.wins[1], Math.max(0, Math.ceil(eng.timeLeft / 60)),
+    eng.p.hp, eng.a.hp, eng.p.meter, eng.a.meter,
+    eng.brain.desync > 0 ? 1 : 0, eng.matchWinner ?? "-",
+    eng.recorder.totalActs, eng.drill?.id ?? "-", eng.drillProgress, eng.drillFails, eng.drillDone ? 1 : 0,
+    eng.tally.reads, eng.tally.breaks, eng.tally.streak, eng.tally.worstStreak,
+    mission,
+  ].join("|");
+}
+
 function snap(eng: Engine): GameSnapshot {
   return {
     phase: eng.phase,
@@ -279,6 +293,7 @@ export function useMirrorGame(active: boolean, spectate = false) {
     let last = performance.now();
     let acc = 0;
     let tick = 0;
+    let lastKey = '';
     let pHp = eng.p.hp, aHp = eng.a.hp, prevPhase = eng.phase, prevMirror = 0, prevProj = 0;
 
     const loop = (now: number) => {
@@ -360,7 +375,13 @@ export function useMirrorGame(active: boolean, spectate = false) {
         }
       }
       render(ctx, eng, now);
-      if (tick % 5 === 0) setSnapshot(snap(eng));
+      if (tick % 5 === 0) {
+        const k = snapKey(eng);
+        if (k !== lastKey) {
+          lastKey = k;
+          setSnapshot(snap(eng));
+        }
+      }
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);

@@ -1,376 +1,401 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ARCHETYPE_META, type Archetype } from '../game/dna';
 import { STAGES } from '../game/evolution';
 import CharacterPreview from './CharacterPreview';
+import { sfx } from '../game/audio';
+import { useI18n } from '../i18n';
+import LangSwitch from './LangSwitch';
 
-interface Props { onStart: () => void }
+export type MenuId = 'training' | 'dungeon' | 'mirror' | 'league' | 'lab' | 'store';
 
-const LOOP = [
-  { n: '01', t: '전투한다', d: '당신이 직접 싸웁니다.' },
-  { n: '02', t: '습관을 수집한다', d: '입력 속도·간격·상황별 선택을 초당 60회 기록.' },
-  { n: '03', t: '다음 행동을 예측한다', d: 'n-gram 습관 모델이 당신의 손을 읽습니다.' },
-  { n: '04', t: '맞출수록 강해진다', d: '적중률이 오를수록 SIMULA가 먼저 움직입니다.' },
-  { n: '05', t: '습관 때문에 패배한다', d: '당신이 진 상대는 SIMULA가 아니라 당신입니다.' },
-  { n: '06', t: '리포트로 약점 확인', d: '“압박받을 때 점프 67%” — 손버릇이 문장이 됩니다.' },
-  { n: '07', t: '훈련으로 교정한다', d: '금지 드릴로 근육 기억을 다시 씁니다.' },
-  { n: '08', t: '다시 싸운다', d: '고친 습관으로 예측 모델을 붕괴시키세요.' },
-];
+interface Props {
+  onSelect: (id: MenuId) => void;
+  hasAi?: boolean;
+  aiName?: string;
+  aiArch?: string;
+  dungeonCleared?: number;
+  simulaLv?: number;
+  generation?: number;
+}
 
-const MECH = [
-  {
-    k: 'ANALYSIS',
-    t: 'Next Input Prediction',
-    d: '거리·직전 행동·상황을 조건으로 다음 입력을 확률 예측합니다. 신뢰도와 예측불가능성이 실시간으로 표시됩니다.',
-    c: 'from-cyan-500/20 to-transparent border-cyan-400/30 text-cyan-300',
-  },
-  {
-    k: 'ANALYSIS',
-    t: 'Input Biometrics · Habit n-Gram',
-    d: '평균 입력 간격, 최속 연타, APM, 반응속도, 시선 이동. 그리고 3연쇄 손버릇까지 n-gram으로 추출합니다.',
-    c: 'from-fuchsia-500/20 to-transparent border-fuchsia-400/30 text-fuchsia-300',
-  },
-  {
-    k: 'PROFILE',
-    t: 'Action Bias · Live Combat DNA',
-    d: '공격성·방어성·카운터·잡기 의존도·압박 지속력·위험 감수·반복 패턴이 싸우는 동안 실시간으로 움직입니다.',
-    c: 'from-emerald-500/20 to-transparent border-emerald-400/30 text-emerald-300',
-  },
-  {
-    k: 'VERDICT',
-    t: 'SIMULA의 진단',
-    d: '“당신은 위기로 몰리면 위로 도망갑니다.” 수치가 아니라 문장으로 당신의 손버릇을 마주하게 됩니다.',
-    c: 'from-amber-500/20 to-transparent border-amber-400/30 text-amber-300',
-  },
-];
+interface MenuItem {
+  id: MenuId;
+  label: string;
+  kr: string;
+  desc: string;
+  color: string;
+  icon: string;
+  locked?: boolean;
+  badge?: string;
+}
 
-const KEYS: [string, string][] = [
-  ['A / D', '이동 (더블 탭 = 대시)'],
-  ['W', '점프 · S 웅크리기'],
-  ['SHIFT', '상단 가드 (S+SHIFT = 하단 가드)'],
-  ['J / K', '약 타격 / 강 상단'],
-  ['L / I', '하단 쓸기 / 잡기'],
-  ['↓↘→ +공격', '미러파 (장풍) — 또는 키 1'],
-  ['→↓↘ +공격', '리플렉스 어퍼 (무적 대공) — 키 2'],
-  ['↓↙← +공격', '글리치 슬라이드 (하단 돌진) — 키 3'],
-  ['↓↘→ ×2', '초필살기 역-학습 오버라이드 — 키 R'],
-  ['O', '노이즈 버스트 (게이지 50%)'],
-];
+function buildMenu(t: (k: string) => string): MenuItem[] {
+  return [
+    {
+      id: 'training', label: 'TRAINING', kr: t('menu.training'), desc: t('menu.training.d'),
+      color: '#38f2ff', icon: '▶', badge: 'MAIN',
+    },
+    {
+      id: 'dungeon', label: 'HABIT DUNGEON', kr: t('menu.dungeon'), desc: t('menu.dungeon.d'),
+      color: '#fb7185', icon: '▲',
+    },
+    {
+      id: 'mirror', label: 'MIRROR BATTLE', kr: t('menu.mirror'), desc: t('menu.mirror.d'),
+      color: '#b478ff', icon: '◉',
+    },
+    {
+      id: 'league', label: 'GHOST LEAGUE', kr: t('menu.league'), desc: t('menu.league.d'),
+      color: '#ff9a3c', icon: '⚔',
+    },
+    {
+      id: 'lab', label: 'AI LAB', kr: t('menu.lab'), desc: t('menu.lab.d'),
+      color: '#7dffc2', icon: '⌗',
+    },
+    {
+      id: 'store', label: 'STORE', kr: t('menu.store'), desc: t('menu.store.d'),
+      color: '#f0abfc', icon: '▦',
+    },
+  ];
+}
 
-export default function TitleScreen({ onStart }: Props) {
+// ── SF식 로고 ─────────────────────────────────────
+function Logo() {
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-[#04060d] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(217,70,239,.20),transparent_55%),radial-gradient(circle_at_20%_80%,rgba(34,211,238,.16),transparent_55%)]" />
-      <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(255,255,255,.6)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.6)_1px,transparent_1px)] [background-size:44px_44px]" />
-
-      <div className="relative mx-auto flex max-w-6xl flex-col gap-8 px-5 py-10 md:py-16">
-        <div className="grid items-center gap-8 md:grid-cols-[1.15fr_0.85fr]">
-          <div>
-            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-1 font-mono text-[10px] tracking-[0.25em] text-fuchsia-300">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-fuchsia-400" />
-              AI 습관 분석 격투게임 · SELF-MIRROR FIGHTING
-            </div>
-            <h1 className="text-[clamp(2.4rem,7vw,4.6rem)] font-black leading-[0.92] tracking-tighter">
-              <span className="block bg-gradient-to-r from-cyan-200 via-white to-fuchsia-300 bg-clip-text text-transparent">
-                MIRROR NEURAL
-              </span>
-              <span className="block bg-gradient-to-r from-fuchsia-400 via-rose-300 to-cyan-200 bg-clip-text text-transparent">
-                BRAWLER
-              </span>
-            </h1>
-            <p className="mt-3 font-mono text-sm tracking-[0.2em] text-white/45">
-              Train Yourself. Fight Yourself. Beat Everyone.
-            </p>
-            <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-white/70">
-              일반 격투게임은 <b className="text-white">상대를 이기는</b> 게임입니다.
-              이 게임은 <b className="text-fuchsia-300">내 반복 행동과 손버릇을 깨는</b> 게임입니다.
-              AI가 당신의 입력 패턴을 학습하고, 그 습관을 그대로 이용해 당신을 이깁니다.
-              <b className="text-emerald-300"> 이기려면 자기 자신을 배신해야 합니다.</b>
-            </p>
-
-            <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-3">
-              <div className="mb-2 font-mono text-[9px] tracking-[0.25em] text-white/35">CORE LOOP</div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-4">
-                {LOOP.map((s) => (
-                  <div key={s.n} className="group">
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="font-mono text-[9px] text-cyan-300/60">{s.n}</span>
-                      <span className="text-[11.5px] font-bold text-white/80">{s.t}</span>
-                    </div>
-                    <div className="font-mono text-[9px] leading-snug text-white/30">{s.d}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center gap-3">
-              <button
-                onClick={onStart}
-                className="group relative overflow-hidden rounded-md border border-cyan-300/50 bg-gradient-to-r from-cyan-500/25 to-fuchsia-500/25 px-8 py-3.5 font-mono text-sm font-bold tracking-[0.2em] text-white transition-all hover:border-cyan-200 hover:shadow-[0_0_30px_rgba(34,211,238,.35)] active:scale-95"
-              >
-                <span className="relative z-10">▸ 내 AI 파이터 만들기</span>
-                <span className="absolute inset-0 -translate-x-full bg-white/20 transition-transform duration-500 group-hover:translate-x-0" />
-              </button>
-              <span className="font-mono text-[11px] text-white/35">직접 싸울수록 AI가 당신을 닮아갑니다</span>
-            </div>
-          </div>
-
-          {/* 캐릭터 VS — 실제 게임 렌더러로 실시간 렌더링 */}
-          <div className="relative">
-            <div className="absolute -inset-4 rounded-2xl bg-[radial-gradient(circle,rgba(217,70,239,.2),transparent_70%)] blur-2xl" />
-            <div className="relative grid grid-cols-2 gap-2">
-              {/* OPERATOR */}
-              <div className="relative overflow-hidden rounded-xl border border-cyan-300/25 bg-[#05070f]">
-                <CharacterPreview who="operator" size={220} pose="idle" className="mx-auto block" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
-                <div className="absolute inset-0 opacity-[0.15] [background:repeating-linear-gradient(0deg,transparent_0_2px,rgba(0,0,0,.9)_2px_3px)]" />
-                <div className="absolute bottom-0 left-0 right-0 p-3">
-                  <div className="font-mono text-[9px] tracking-[0.3em] text-cyan-300">PLAYER</div>
-                  <div className="text-lg font-black tracking-tight">오퍼레이터</div>
-                  <p className="mt-0.5 text-[10.5px] leading-snug text-white/50">
-                    바이저 너머로 세계를 읽는 테크슈트 파이터. 당신의 손이 곧 이 캐릭터의 신경입니다.
-                  </p>
-                </div>
-              </div>
-              {/* SIMULA */}
-              <div className="relative overflow-hidden rounded-xl border border-fuchsia-400/25 bg-[#05070f]">
-                <CharacterPreview who="simula" size={220} pose="idle" className="mx-auto block" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
-                <div className="absolute inset-0 opacity-[0.15] [background:repeating-linear-gradient(0deg,transparent_0_2px,rgba(0,0,0,.9)_2px_3px)]" />
-                <div className="absolute bottom-0 left-0 right-0 p-3">
-                  <div className="font-mono text-[9px] tracking-[0.3em] text-fuchsia-300">DOPPELGÄNGER</div>
-                  <div className="text-lg font-black tracking-tight">시뮬라</div>
-                  <p className="mt-0.5 text-[10.5px] leading-snug text-white/50">
-                    이목구비가 없는 액체 거울. 습관을 흡수할수록 표면이 선명해지고, 끝내 당신이 됩니다.
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="pointer-events-none absolute left-1/2 top-[38%] -translate-x-1/2 -translate-y-1/2">
-              <span className="block rounded-full border border-white/25 bg-black/85 px-3 py-1 font-mono text-[13px] font-black tracking-widest text-white backdrop-blur">
-                VS
-              </span>
-            </div>
-            <div className="mt-2 text-center font-mono text-[9px] text-white/25">
-              ↑ 게임 내 실시간 렌더링 · 관절 IK · 셀 셰이딩
-            </div>
-          </div>
+    <div className="relative select-none">
+      <div
+        className="text-[clamp(2.2rem,8.5vw,5.4rem)] font-black italic leading-[0.82] tracking-tighter"
+        style={{ transform: 'skewX(-11deg)' }}
+      >
+        <div
+          className="bg-gradient-to-b from-white via-cyan-100 to-cyan-400 bg-clip-text text-transparent"
+          style={{ filter: 'drop-shadow(0 3px 0 #062a3d) drop-shadow(0 0 28px rgba(56,242,255,.4))' }}
+        >
+          MIRROR NEURAL
         </div>
-
-        {/* 메커니즘 */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {MECH.map((m) => (
-            <div key={m.k} className={`rounded-lg border bg-gradient-to-b p-4 ${m.c}`}>
-              <div className="font-mono text-[10px] tracking-[0.25em] opacity-80">{m.k}</div>
-              <div className="mt-1 text-lg font-bold text-white">{m.t}</div>
-              <p className="mt-2 text-[12.5px] leading-relaxed text-white/60">{m.d}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* 게임 모드 */}
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {([
-            ['MODE 01', 'Mirror Battle', '내 습관을 학습한 AI와 싸우는 메인 모드', '◉', '#38f2ff'],
-            ['MODE 02', 'Ghost Upload', '접속하지 않아도 내 AI가 대신 싸웁니다', '☁', '#b478ff'],
-            ['MODE 03', 'AI vs AI League', '조작 없이 내 AI를 리그에 출전시킵니다', '⚔', '#ff9a3c'],
-            ['MODE 04', 'Habit Dungeon', '층마다 하나의 습관을 봉인하는 5층 챌린지', '▲', '#fb7185'],
-          ] as const).map(([tag, t, d, ic, c]) => (
-            <div key={t} className="relative overflow-hidden rounded-lg border p-3"
-              style={{ borderColor: `${c}33`, background: `${c}0d` }}>
-              <div className="pointer-events-none absolute -right-2 -top-3 select-none text-[54px] leading-none opacity-[0.09]">{ic}</div>
-              <div className="relative">
-                <div className="font-mono text-[9px] tracking-[0.3em]" style={{ color: c }}>{tag}</div>
-                <div className="mt-0.5 text-[15px] font-black text-white">{t}</div>
-                <div className="mt-0.5 text-[11px] leading-snug text-white/45">{d}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* SIMULA 진화 단계 */}
-        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="font-mono text-[10px] tracking-[0.25em] text-white/40">SIMULA EVOLUTION · 적도 성장합니다</h3>
-            <span className="font-mono text-[9px] text-white/25">6단계 · 누적 학습량으로 진화</span>
-          </div>
-          <div className="mt-3 grid gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
-            {STAGES.map((s) => (
-              <div
-                key={s.lv}
-                className="relative overflow-hidden rounded-md border p-2.5"
-                style={{ borderColor: `${s.color}35`, background: `${s.color}0c` }}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span style={{ color: s.color }}>{s.icon}</span>
-                  <span className="font-mono text-[9px] tracking-widest text-white/35">LV.{s.lv}</span>
-                </div>
-                <div className="mt-0.5 text-[13px] font-black" style={{ color: s.color }}>{s.kr}</div>
-                <div className="mt-0.5 text-[10.5px] leading-snug text-white/45">{s.summary}</div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 rounded-md border border-white/20 bg-white/[0.05] px-4 py-2.5">
-            <div className="font-mono text-[9px] tracking-[0.25em] text-white/30">FINAL STAGE · Lv.6 배신자</div>
-            <div className="mt-0.5 text-[15px] font-black tracking-tight text-white">
-              “SIMULA는 이제 당신을 모방하지 않습니다. <span className="text-rose-300">당신을 공략합니다.</span>”
-            </div>
-          </div>
-        </div>
-
-        {/* 전투 타입 */}
-        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="font-mono text-[10px] tracking-[0.25em] text-white/40">COMBAT DNA · 당신은 어떤 타입입니까?</h3>
-            <span className="font-mono text-[9px] text-white/25">9개 지표 · 8개 전투 타입</span>
-          </div>
-          <div className="mt-3 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
-            {(Object.keys(ARCHETYPE_META) as Archetype[]).map((k) => {
-              const m = ARCHETYPE_META[k];
-              return (
-                <div
-                  key={k}
-                  className="rounded-md border p-2.5 transition hover:brightness-125"
-                  style={{ borderColor: `${m.color}30`, background: `${m.color}0c` }}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span style={{ color: m.color }}>{m.icon}</span>
-                    <span className="text-[12px] font-black tracking-tight" style={{ color: m.color }}>
-                      {k.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 font-mono text-[9px] text-white/35">{m.kr} · {m.tagline}</div>
-                  <div className="mt-1 text-[10.5px] leading-snug text-white/45">{m.weak}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-1.5 sm:grid-cols-9">
-            {['공격성', '방어성', '반복성', '위험 감수', '잡기 의존도', '점프 의존도', '압박 지속력', '카운터 성향', '거리 유지'].map((s) => (
-              <div key={s} className="rounded border border-white/10 bg-black/30 px-1.5 py-1 text-center font-mono text-[9px] text-white/45">
-                {s}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 5대 핵심 시스템 */}
-        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="font-mono text-[10px] tracking-[0.25em] text-white/40">CORE SYSTEMS · 이 게임을 이루는 5가지</h3>
-            <span className="font-mono text-[9px] text-white/25">전부 실제 데이터로 작동합니다</span>
-          </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-            {([
-              ['01', '패배 원인 분석', '문장화', '수치가 아니라 인과 사슬로 왜 졌는지 설명합니다.', '#fb7185', '⌗'],
-              ['02', 'Habit Break', '훈련 모드', '습관을 봉인한 채 이겨야 하는 제약 미션과 5층 던전.', '#7dffc2', '▲'],
-              ['03', 'Combat DNA', '타입 시스템', '9지표 · 8타입. 내 플레이가 곧 파이터의 정체성.', '#38f2ff', '◈'],
-              ['04', 'AI 성장 단계', '6단계 진화', '관찰자에서 배신자까지, 적도 함께 자랍니다.', '#ff9a3c', '✖'],
-              ['05', '예측당한 순간', '전투 연출', '읽힌 순간 시간이 멈춥니다. 이 게임의 중독성.', '#ff4fa3', '⚡'],
-            ] as const).map(([n, t, s, d, c, ic]) => (
-              <div key={n} className="relative overflow-hidden rounded-md border p-3"
-                style={{ borderColor: `${c}30`, background: `${c}0c` }}>
-                <div className="pointer-events-none absolute -right-1 -top-2 select-none text-[44px] leading-none opacity-[0.1]">{ic}</div>
-                <div className="relative">
-                  <div className="font-mono text-[9px] tracking-[0.3em]" style={{ color: c }}>{n}</div>
-                  <div className="mt-0.5 text-[13.5px] font-black leading-tight text-white">{t}</div>
-                  <div className="font-mono text-[9px]" style={{ color: `${c}bb` }}>{s}</div>
-                  <div className="mt-1 text-[10.5px] leading-snug text-white/45">{d}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* READ MOMENT */}
-        <div className="relative overflow-hidden rounded-lg border border-rose-400/30 bg-gradient-to-r from-rose-600/[0.14] to-transparent p-5">
-          <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background:repeating-linear-gradient(0deg,transparent_0_2px,#fff_2px_3px)]" />
-          <div className="relative grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
-            <div>
-              <div className="font-mono text-[10px] tracking-[0.3em] text-rose-300/80">THE CORE FEELING</div>
-              <h3 className="mt-1 text-[clamp(1.3rem,4.5vw,1.9rem)] font-black leading-tight tracking-tight text-white">
-                “아, 방금 읽혔다.”
-              </h3>
-              <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-white/60">
-                맞아서 체력이 깎이는 것은 재미가 아닙니다. 이 게임의 중독성은{' '}
-                <b className="text-rose-200">AI가 나를 읽어낸 그 순간</b>에 있습니다.
-                예측이 적중하면 화면이 느려지고, 당신의 캐릭터에 락온 조준선이 그려지며,
-                SIMULA가 당신의 손버릇을 이름으로 부릅니다.
-              </p>
-            </div>
-            <div className="shrink-0 rounded-lg border border-rose-400/35 bg-black/60 px-6 py-4 text-center">
-              <div className="font-mono text-[clamp(1.6rem,6vw,2.4rem)] font-black leading-none tracking-tighter text-white">
-                PREDICTED
-              </div>
-              <div className="mt-1 text-[14px] font-black text-rose-300">당신은 또 점프했습니다.</div>
-              <div className="mt-0.5 font-mono text-[9.5px] text-white/40">
-                SIMULA predicted your JUMP · ×7
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 수익 모델 */}
-        <div className="grid gap-3 md:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-lg border border-cyan-300/25 bg-gradient-to-r from-cyan-500/[0.08] to-transparent p-4">
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <div className="font-mono text-[10px] tracking-[0.25em] text-cyan-300/80">BASE GAME · STEAM</div>
-                <div className="mt-0.5 text-lg font-black text-white">단일 유료 구매 — 전 모드 포함</div>
-              </div>
-              <div className="font-mono text-3xl font-black text-white">$12.99</div>
-            </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-white/55">
-              무료 게임이 아닙니다. 본편 하나로 Mirror Battle · Ghost Upload · AI League · Habit Dungeon ·
-              Combat DNA · SIMULA 6단계 진화가 모두 포함됩니다. 추가 판매는 확장과 외형에만 한정됩니다.
-            </p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {['AI 성격 팩', '추가 스테이지', 'AI 리포트 확장팩', '시즌 패스', '스킨 / HUD 테마', '프로필 카드'].map((s) => (
-                <span key={s} className="rounded border border-white/12 bg-black/30 px-1.5 py-0.5 font-mono text-[9px] text-white/45">
-                  {s}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-lg border border-emerald-400/30 bg-emerald-400/[0.06] p-4">
-            <div className="flex items-center gap-2">
-              <span className="text-emerald-300">✓</span>
-              <span className="font-mono text-[10px] font-bold tracking-[0.25em] text-emerald-300">NO PAY-TO-WIN</span>
-            </div>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/65">
-              데미지, 프레임 데이터, AI 학습 속도, 매칭 보정에 영향을 주는 상품은 <b className="text-white">존재하지 않습니다.</b>
-            </p>
-            <div className="mt-2 space-y-1 font-mono text-[10.5px]">
-              <div className="text-rose-300/70">✕ 능력치 강화 · 학습 가속 · 습관 자동 교정</div>
-              <div className="text-cyan-300/70">○ 외형 · 아레나 · 분석 도구 · 저장 슬롯</div>
-            </div>
-          </div>
-        </div>
-
-        {/* 조작 + 공략 */}
-        <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
-          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-            <h3 className="font-mono text-[10px] tracking-[0.25em] text-white/40">CONTROLS · 키보드 / 터치 모두 지원</h3>
-            <div className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-              {KEYS.map(([k, v]) => (
-                <div key={k} className="flex items-center gap-2">
-                  <kbd className="min-w-[62px] rounded border border-white/20 bg-black/50 px-2 py-1 text-center font-mono text-[10px] text-cyan-200">{k}</kbd>
-                  <span className="text-[12px] text-white/60">{v}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.04] p-4">
-            <h3 className="font-mono text-[10px] tracking-[0.25em] text-emerald-300/70">SURVIVAL PROTOCOL · 공략</h3>
-            <ul className="mt-3 space-y-1.5 text-[12.5px] leading-relaxed text-white/65">
-              <li>▸ <b className="text-rose-300">HABIT BREAK MISSION</b>: “점프 5회 이하로 승리”, “같은 콤보 3회 반복 금지”처럼 <b className="text-white">습관을 쓰지 않고 이기는</b> 제약 미션이 있습니다.</li>
-              <li>▸ <b className="text-white">캔슬 콤보</b>: 기술이 히트/가드되면 18F 캔슬 창이 열립니다. 통상기 → 필살기 → 초필살기로 연결하세요.</li>
-              <li>▸ <b className="text-white">가위바위보 삼각형</b>: 잡기 &gt; 가드 &gt; 타격 &gt; 잡기. 강 상단은 하단 가드를 뚫고, 하단 쓸기는 상단 가드를 뚫습니다.</li>
-              <li>▸ <b className="text-emerald-300">예측 실패</b>를 유도하면 시뮬라가 동기화 오류(DESYNC)로 경직되고 노이즈 게이지가 크게 찹니다.</li>
-              <li>▸ 게이지 100%에서 <b className="text-emerald-300">노이즈 버스트(O)</b>는 시뮬라가 수집한 학습 데이터를 물리적으로 파괴합니다.</li>
-              <li>▸ 패널의 <b className="text-white">예측불가능성</b> 수치를 70% 이상으로 유지하세요. 리듬이 일정하면 반드시 읽힙니다.</li>
-            </ul>
-          </div>
+        <div
+          className="bg-gradient-to-b from-fuchsia-200 via-rose-300 to-fuchsia-600 bg-clip-text text-transparent"
+          style={{ filter: 'drop-shadow(0 3px 0 #3d0620) drop-shadow(0 0 28px rgba(255,79,163,.45))' }}
+        >
+          BRAWLER
         </div>
       </div>
+      <div className="mt-1.5 flex items-center gap-2" style={{ transform: 'skewX(-11deg)' }}>
+        <span className="h-[2px] w-8 bg-cyan-400" />
+        <span className="font-mono text-[clamp(7px,1.4vw,11px)] font-bold tracking-[0.28em] text-cyan-200/70">
+          AI 습관 분석 격투 · SELF-MIRROR FIGHTING
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── 배경 ─────────────────────────────────────────
+function Backdrop({ accent }: { accent: string }) {
+  return (
+    <>
+      {/* 상단 스포트라이트 */}
+      <div
+        className="pointer-events-none absolute inset-0 transition-colors duration-700"
+        style={{
+          background: `radial-gradient(ellipse 90% 62% at 50% -12%, ${accent}2e, transparent 62%),
+                       radial-gradient(ellipse 60% 50% at 15% 108%, rgba(34,211,238,.14), transparent 60%),
+                       radial-gradient(ellipse 60% 50% at 88% 105%, rgba(217,70,239,.16), transparent 60%)`,
+        }}
+      />
+      {/* 대각 스트라이프 */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.045]"
+        style={{
+          background: `repeating-linear-gradient(115deg, transparent 0 26px, #fff 26px 27px)`,
+        }}
+      />
+      {/* 격자 */}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,.6)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.6)_1px,transparent_1px)] [background-size:52px_52px]" />
+      {/* 스캔라인 */}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.16] [background:repeating-linear-gradient(0deg,transparent_0_2px,rgba(0,0,0,.85)_2px_3px)]" />
+      {/* 비네트 */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_38%,rgba(0,0,0,.82))]" />
+    </>
+  );
+}
+
+export default function TitleScreen({
+  onSelect, hasAi, aiName, aiArch, dungeonCleared = 0, simulaLv = 1, generation = 0,
+}: Props) {
+  const { t } = useI18n();
+  const [attract, setAttract] = useState(true);
+  const [sel, setSel] = useState(0);
+
+  const move = useCallback((d: number, n: number) => {
+    setSel((s) => {
+      const next = (s + d + n) % n;
+      if (next !== s) sfx.ui();
+      return next;
+    });
+  }, []);
+
+  const MENU = useMemo(() => buildMenu(t), [t]);
+  const items = useMemo(() => MENU.map((m) => ({
+    ...m,
+    locked: (m.id === 'mirror' || m.id === 'league') && !hasAi,
+  })), [MENU, hasAi]);
+
+  const cur = items[sel];
+  const accent = cur.color;
+
+  const confirm = useCallback(() => {
+    if (attract) { setAttract(false); return; }
+    if (!cur.locked) onSelect(cur.id);
+  }, [attract, cur, onSelect]);
+
+  // 키보드 내비게이션
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'enter', 'w', 's'].includes(k)) {
+        e.preventDefault();
+      }
+      if (attract) {
+        if (k === ' ' || k === 'enter' || k.startsWith('arrow') || 'wasd'.includes(k)) setAttract(false);
+        return;
+      }
+      if (k === 'arrowup' || k === 'w') move(-1, items.length);
+      else if (k === 'arrowdown' || k === 's') move(1, items.length);
+      else if (k === ' ' || k === 'enter') confirm();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [attract, confirm, items.length, move]);
+
+  const archMeta = aiArch ? ARCHETYPE_META[aiArch as Archetype] : null;
+  const stage = STAGES[Math.max(0, Math.min(5, simulaLv - 1))];
+
+  return (
+    <div className="relative min-h-screen w-full overflow-hidden bg-[#03050b] text-white">
+      <Backdrop accent={accent} />
+
+      {/* ═══ 어트랙트 모드 (PRESS START) ═══ */}
+      {attract ? (
+        <button
+          onClick={() => setAttract(false)}
+          className="absolute inset-0 z-20 flex cursor-pointer flex-col items-center justify-center"
+        >
+          <Logo />
+          <div className="mt-12 animate-[pulse_1.25s_ease-in-out_infinite] font-mono text-[clamp(11px,2.4vw,17px)] font-black tracking-[0.42em] text-white/85">
+            {t('app.pressAnyKey')}
+          </div>
+          <div className="mt-3 font-mono text-[10px] tracking-[0.2em] text-white/30">
+            {t('app.insertCoin')}
+          </div>
+          {/* VS 엠블럼 */}
+          <div
+            className="mt-8 font-mono text-[clamp(28px,7vw,58px)] font-black italic leading-none tracking-tighter"
+            style={{
+              transform: 'skewX(-11deg)',
+              color: 'transparent',
+              WebkitTextStroke: '1.5px rgba(255,255,255,.22)',
+            }}
+          >
+            VS
+          </div>
+
+          {/* 언어 선택 */}
+          <div
+            className="mt-6 w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2 font-mono text-[9px] tracking-[0.3em] text-white/35">LANGUAGE</div>
+            <LangSwitch variant="full" />
+          </div>
+          {/* 하단 캐릭터 실루엣 */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center opacity-30">
+            <CharacterPreview who="simula" size={520} className="translate-y-[26%]" />
+          </div>
+        </button>
+      ) : (
+      /* ═══ 메인 메뉴 ═══ */
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 md:px-8">
+        {/* 헤더 */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="scale-90 origin-left md:scale-100"><Logo /></div>
+          {/* 스테이터스 */}
+          <div className="flex shrink-0 flex-col items-end gap-1.5 pt-1">
+            <div className="flex items-center gap-2" style={{ transform: 'skewX(-11deg)' }}>
+              <span
+                className="rounded-sm border px-2 py-0.5 font-mono text-[10px] font-black tracking-widest"
+                style={{ borderColor: `${stage.color}66`, background: `${stage.color}18`, color: stage.color }}
+              >
+                SIMULA LV.{stage.lv} {stage.kr}
+              </span>
+            </div>
+            {hasAi && archMeta && (
+              <div className="flex items-center gap-2" style={{ transform: 'skewX(-11deg)' }}>
+                <span
+                  className="rounded-sm border px-2 py-0.5 font-mono text-[10px] font-black tracking-widest"
+                  style={{ borderColor: `${archMeta.color}55`, background: `${archMeta.color}14`, color: archMeta.color }}
+                >
+                  {archMeta.icon} {aiName}
+                </span>
+              </div>
+            )}
+            <div className="font-mono text-[9px] tracking-widest text-white/25">
+              DUNGEON {dungeonCleared}/5 · {t('lab.generation')} {generation ?? '—'}
+            </div>
+            <div className="mt-1"><LangSwitch variant="compact" /></div>
+          </div>
+        </div>
+
+        {/* 본문 */}
+        <div className="mt-5 grid flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.92fr)]">
+          {/* ── 좌: 메뉴 리스트 ── */}
+          <div className="flex flex-col justify-center gap-1.5">
+            {items.map((m, i) => {
+              const on = i === sel;
+              return (
+                <button
+                  key={m.id}
+                  onMouseEnter={() => { if (sel !== i) { setSel(i); sfx.ui(); } }}
+                  onClick={() => { if (!m.locked) onSelect(m.id); }}
+                  className="group relative w-full text-left"
+                  style={{ opacity: m.locked ? 0.38 : 1 }}
+                >
+                  {/* 뒤 배경 바 */}
+                  <div
+                    className="absolute inset-y-0 left-0 transition-all duration-200"
+                    style={{
+                      width: on ? 'calc(100% - 6px)' : '0%',
+                      transform: 'skewX(-11deg)',
+                      background: `linear-gradient(90deg, ${m.color}, ${m.color}22)`,
+                      boxShadow: on ? `0 0 26px ${m.color}55` : 'none',
+                    }}
+                  />
+                  <div
+                    className="relative flex items-center gap-3 px-4 py-2.5 md:py-3"
+                    style={{ transform: 'skewX(-11deg)' }}
+                  >
+                    <span
+                      className="w-4 shrink-0 font-mono text-[13px] font-black transition-all"
+                      style={{ color: m.color, opacity: on ? 1 : 0.25 }}
+                    >
+                      {on ? '▶' : '▷'}
+                    </span>
+                    <span
+                      className="text-[clamp(15px,3.2vw,26px)] font-black italic leading-none tracking-tight transition-colors"
+                      style={{
+                        color: on ? '#04070e' : 'rgba(255,255,255,.72)',
+                        textShadow: on ? 'none' : '0 0 18px rgba(255,255,255,.08)',
+                      }}
+                    >
+                      {m.label}
+                    </span>
+                    <span
+                      className="ml-auto shrink-0 font-mono text-[10px] font-bold tracking-widest"
+                      style={{ color: on ? 'rgba(4,7,14,.7)' : `${m.color}bb` }}
+                    >
+                      {m.locked ? 'LOCKED' : m.kr}
+                    </span>
+                  </div>
+                  {m.badge && !m.locked && (
+                    <span
+                      className="absolute right-1 top-1 rounded-sm px-1.5 py-[1px] font-mono text-[8px] font-black tracking-widest"
+                      style={{ background: '#04070e', color: m.color, transform: 'skewX(-11deg)' }}
+                    >
+                      {m.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[9.5px] tracking-wider text-white/28">
+              <span>↑↓ / W S 선택</span>
+              <span>ENTER / CLICK 결정</span>
+              <span className="text-cyan-300/40">Your Fighting Style Becomes Your Fighter.</span>
+            </div>
+          </div>
+
+          {/* ── 우: 모드 프리뷰 ── */}
+          <div className="relative flex flex-col justify-center">
+            <div
+              className="relative overflow-hidden border-l-2 bg-black/45 backdrop-blur-sm transition-colors duration-300"
+              style={{ borderColor: accent, boxShadow: `inset 0 0 60px ${accent}12` }}
+            >
+              {/* 상단 라벨 */}
+              <div
+                className="flex items-center justify-between px-4 py-1.5"
+                style={{ background: `linear-gradient(90deg, ${accent}33, transparent)`, transform: 'skewX(-11deg)' }}
+              >
+                <span className="font-mono text-[10px] font-black tracking-[0.3em]" style={{ color: accent }}>
+                  {cur.icon} {cur.label}
+                </span>
+                <span className="font-mono text-[9px] tracking-widest text-white/40">{cur.kr}</span>
+              </div>
+
+              {/* 캐릭터 프리뷰 */}
+              <div className="relative flex items-end justify-center overflow-hidden">
+                <div
+                  className="pointer-events-none absolute inset-0"
+                  style={{ background: `radial-gradient(ellipse 70% 60% at 50% 62%, ${accent}26, transparent 68%)` }}
+                />
+                <CharacterPreview
+                  who={sel <= 1 || sel === 4 ? 'simula' : 'operator'}
+                  size={330}
+                  pose={sel === 0 || sel === 2 ? 'idle' : 'guard'}
+                  className="relative z-10 scale-95"
+                />
+                {sel === 0 && (
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center opacity-25">
+                    <CharacterPreview who="operator" size={280} pose="attack" className="translate-x-16 translate-y-3" />
+                  </div>
+                )}
+              </div>
+
+              {/* 설명 */}
+              <div className="border-t border-white/10 px-4 py-3">
+                <p className="text-[12.5px] leading-relaxed text-white/65">{cur.desc}</p>
+                {cur.locked && (
+                  <div className="mt-2 rounded border border-rose-400/35 bg-rose-500/10 px-2.5 py-1.5 font-mono text-[10px] text-rose-200">
+                    {t('menu.locked.ai')}
+                  </div>
+                )}
+              </div>
+
+              {/* 진입 버튼 */}
+              <button
+                onClick={() => { if (!cur.locked) onSelect(cur.id); }}
+                disabled={cur.locked}
+                className="w-full py-3 font-mono text-[13px] font-black tracking-[0.3em] transition-all enabled:hover:brightness-125 active:scale-[0.99] disabled:opacity-30"
+                style={{ background: `linear-gradient(90deg, ${accent}, ${accent}88)`, color: '#04070e' }}
+              >
+                {cur.locked ? 'LOCKED' : 'PRESS ENTER'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 코어 루프 티커 */}
+        <div
+          className="mt-3 overflow-hidden border-y border-white/10 bg-black/40 py-1.5"
+          style={{ transform: 'skewX(-11deg)' }}
+        >
+          <div className="flex items-center gap-2 overflow-x-auto px-3 font-mono text-[9.5px] tracking-wider text-white/40 [scrollbar-width:none]">
+            {['① 전투한다', '② 습관을 수집한다', '③ 다음 입력을 예측한다', '④ 맞출수록 강해진다',
+              '⑤ 습관 때문에 패배한다', '⑥ 리포트로 약점 확인', '⑦ 훈련으로 교정한다', '⑧ 다시 싸운다'].map((s) => (
+              <span key={s} className="shrink-0 whitespace-nowrap">{s}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* 하단 바 */}
+        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 font-mono text-[9px] tracking-widest text-white/25">
+          <span>VER 1.0 · MIRROR NEURAL BRAWLER</span>
+          <span className="flex items-center gap-3">
+            <span>© 2026 SELF-MIRROR FIGHTING SYSTEM</span>
+            <span className="text-white/40">NO PAY-TO-WIN</span>
+          </span>
+        </div>
+      </div>
+      )}
     </div>
   );
 }

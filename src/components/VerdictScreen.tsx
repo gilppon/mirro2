@@ -6,14 +6,18 @@ function useTypeIn(text: string, delay: number, speed = 34) {
   useEffect(() => {
     setOut('');
     let i = 0;
+    let t: number | undefined;
     const start = setTimeout(() => {
-      const t = setInterval(() => {
+      t = window.setInterval(() => {
         i++;
         setOut(text.slice(0, i));
-        if (i >= text.length) clearInterval(t);
+        if (i >= text.length && t !== undefined) window.clearInterval(t);
       }, speed);
     }, delay);
-    return () => clearTimeout(start);
+    return () => {
+      clearTimeout(start);
+      if (t !== undefined) window.clearInterval(t);
+    };
   }, [text, delay, speed]);
   return out;
 }

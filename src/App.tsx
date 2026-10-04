@@ -9,7 +9,7 @@ import {
 } from './game/meta';
 import Hud from './components/Hud';
 import TouchPad from './components/TouchPad';
-import TitleScreen from './components/TitleScreen';
+import TitleScreen, { type MenuId } from './components/TitleScreen';
 import ResultScreen from './components/ResultScreen';
 import LabScreen from './components/LabScreen';
 import SimulaAnalysis from './components/SimulaAnalysis';
@@ -28,6 +28,7 @@ import {
 } from './game/ghost';
 import { ACTION_KR as AKR } from './game/brain';
 import StoreScreen from './components/StoreScreen';
+import { MissionResult, UploadFlash, GenerationFlash, AiMatchResult } from './components/MatchModals';
 import MvpTracker from './components/MvpTracker';
 import ReplayVault from './components/ReplayVault';
 import ShareCard from './components/ShareCard';
@@ -36,7 +37,7 @@ import {
   loadWallet, saveWallet, skinColor, hudColor,
   type StoreItem, type Wallet,
 } from './game/store';
-import { STAGES } from './game/evolution';
+import { STAGES, stageOf } from './game/evolution';
 import { missionById, type Mission } from './game/missions';
 import Tutorial, { markTutorialDone, tutorialDone } from './components/Tutorial';
 import { LocalShadowServer, serializeShadow } from './game/shadow';
@@ -81,7 +82,7 @@ export default function App() {
     spectate,
   );
 
-  // ── 접속하지 않은 동안의 비동기 도전 처리
+  // ── 습관 교정 드릴 시작
   useEffect(() => {
     if (!save.ai || report) return;
     const away = Date.now() - save.lastSeen;
@@ -94,7 +95,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [save.ai?.id]);
 
-  // ── 드릴 완료 시 실제로 습관 데이터를 교정한다
+  // ── 시작 시 고스트 활동 리포트
   const drillDoneRef = useRef(false);
   useEffect(() => {
     if (!snapshot.drillDone) { drillDoneRef.current = false; return; }
@@ -198,7 +199,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, snapshot.phase]);
 
-  // ── 매치 종료 시 리플레이 자동 저장
   const replayRef = useRef(false);
   useEffect(() => {
     if (screen !== 'train' || snapshot.phase !== 'matchEnd') { replayRef.current = false; return; }
@@ -259,7 +259,7 @@ export default function App() {
   }, [snapshot.mission, activeFloor]);
 
   const toLab = useCallback(() => {
-    // 훈련 중 수집한 데이터를 저장소에 반영
+    // 업로드 즉시 리그 활동 시작
     const eng = engine.current;
     if (eng && eng.recording && eng.recorder.totalActs > 0 && !eng.pBot) {
       const merged = mergeRaw(save.raw, eng.recorder, 0.9);
@@ -290,7 +290,6 @@ export default function App() {
     setScreen('train');
   }, [engine, restart, save.simulaXp]);
 
-  // ── SIMULA 진화 XP 저장 + 레벨업 사운드
   const lvRef = useRef(1);
   useEffect(() => {
     if (screen !== 'train') return;
@@ -327,7 +326,6 @@ export default function App() {
     setScreen('train');
   }, [engine, restart]);
 
-  // ── 상점: 구매 / 장착 / 이름 변경
   const buyItem = useCallback((it: StoreItem) => {
     setWallet((w) => {
       if (w.owned.includes(it.id)) return w;
@@ -379,7 +377,6 @@ export default function App() {
     if (eng) eng.skinColor = skinColor(wallet.equippedSkin);
   }, [wallet.equippedSkin, engine]);
 
-  // ── Mirror Battle: 내가 직접 내 AI와 싸운다
   const startMirrorBattle = useCallback(() => {
     const eng = engine.current!;
     const me = save.ai;
@@ -397,7 +394,6 @@ export default function App() {
     setScreen('train');
   }, [engine, restart, save.ai]);
 
-  // ── 시작 시 고스트 활동 리포트
   useEffect(() => {
     if (!ghost.uploaded || !save.ai || digest) return;
     const away = Date.now() - (save.lastSeen || Date.now());
@@ -416,7 +412,6 @@ export default function App() {
   // ── Ghost Upload
   const uploadGhost = useCallback(() => {
     if (!save.ai) return;
-    // Phase 2: 섀도우 프로토콜로 업로드 — 무결성 시그니처 부여 + 로컬 서버에 영속화
     const shadowSrv = new LocalShadowServer();
     shadowSrv.upload(serializeShadow(save.ai));
     const g: GhostState = {
@@ -473,7 +468,6 @@ export default function App() {
     // 층에 맞춰 SIMULA 진화 단계 강제
     const st = STAGES.find((s) => s.lv === f.stageLv);
     if (st) eng.brain.setXp(st.need);
-    // 5층: 플레이어의 최악 습관 추출 → SIMULA 무기로
     if (f.worstHabitOnly) {
       const blocks = analyze(save.raw);
       const worst = [...new Set(blocks.map((b) => b.fixTarget).filter((t) => t !== 'chain'))];
@@ -513,7 +507,7 @@ export default function App() {
     setActiveMission(null);
   }, [engine]);
 
-  // ── 미션 클리어 시 실제 습관 데이터 교정 + 기록
+  // ── 드릴 완료 시 실제로 습관 데이터를 교정한다
   const missionDoneRef = useRef<string | null>(null);
   useEffect(() => {
     const ms = snapshot.mission;
@@ -524,7 +518,7 @@ export default function App() {
     const m = missionById(ms.id);
     if (!m) return;
 
-    // 보상: 겨냥한 손버릇 가중치를 실제로 감쇠
+    // 업로드 즉시 리그 활동 시작
     const raw = { ...save.raw };
     const targets = m.rules.flatMap((r) => [...(r.acts ?? []), ...(r.banned ?? []), ...(r.seq ?? [])]);
     const shrink = (pool: Record<string, number> | undefined, k: number) => {
@@ -631,8 +625,51 @@ export default function App() {
     return mergeRaw(save.raw, eng.recorder, 1);
   }, [screen, snapshot.samples, save.raw, engine]);
 
+  const menuSelect = useCallback((id: MenuId) => {
+    sfx.ui();
+    switch (id) {
+      case 'training': startTrain(); break;
+      case 'dungeon': {
+        const next = Math.min(5, (dungeonCleared.length) + 1);
+        enterFloor(dungeonCleared.length >= 5 ? 5 : next);
+        break;
+      }
+      case 'mirror': startMirrorBattle(); break;
+      case 'league': {
+        if (!save.ai) return;
+        setScreen('lab');
+        setTimeout(() => runLeagueNow(), 120);
+        break;
+      }
+      case 'lab': toLab(); break;
+      case 'store': setStoreOpen(true); setScreen('lab'); break;
+    }
+  }, [startTrain, enterFloor, startMirrorBattle, save.ai, dungeonCleared, toLab, runLeagueNow]);
+
   if (screen === 'title') {
-    return <TitleScreen onStart={() => { sfx.ui(); setScreen(save.ai || save.raw.totalActs > 0 ? 'lab' : 'train'); }} />;
+    return (
+      <>
+        <TitleScreen
+          onSelect={menuSelect}
+          hasAi={!!save.ai}
+          aiName={save.ai?.name}
+          aiArch={save.ai?.archetype}
+          dungeonCleared={dungeonCleared.length}
+          simulaLv={stageOf(save.simulaXp ?? 0).lv}
+          generation={save.generation}
+        />
+        {storeOpen && (
+          <StoreScreen
+            wallet={wallet}
+            aiName={save.ai?.name ?? '미생성 AI'}
+            onBuy={buyItem}
+            onEquip={equipItem}
+            onRename={renameAi}
+            onClose={() => setStoreOpen(false)}
+          />
+        )}
+      </>
+    );
   }
 
   if (screen === 'lab') {
@@ -891,128 +928,3 @@ export default function App() {
     </div>
   );
 }
-
-// ── 미션 결과
-function MissionResult({ snap, onRetry, onLab, onFree }: {
-  snap: NonNullable<ReturnType<typeof useMirrorGame>['snapshot']['mission']>;
-  onRetry: () => void; onLab: () => void; onFree: () => void;
-}) {
-  const ok = snap.cleared;
-  return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/88 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md overflow-hidden rounded-xl border bg-[#070a14]" style={{ borderColor: ok ? 'rgba(125,255,194,.4)' : 'rgba(251,113,133,.4)' }}>
-        <div className={`px-5 py-4 ${ok ? 'bg-gradient-to-r from-emerald-500/20' : 'bg-gradient-to-r from-rose-600/20'} to-transparent`}>
-          <div className="font-mono text-[10px] tracking-[0.3em] text-white/40">HABIT BREAK MISSION</div>
-          <div className={`mt-1 text-3xl font-black tracking-tight ${ok ? 'text-emerald-300' : 'text-rose-300'}`}>
-            {ok ? 'MISSION CLEAR' : 'MISSION FAILED'}
-          </div>
-          <div className="mt-0.5 text-[13px] text-white/60">{snap.title}</div>
-        </div>
-        <div className="space-y-1.5 px-5 py-4">
-          {snap.rules.map((r) => (
-            <div key={r.label} className="flex items-center justify-between rounded border border-white/10 bg-white/[0.03] px-3 py-1.5">
-              <span className="text-[12px] text-white/70">{r.label}</span>
-              <span className={`font-mono text-[11px] font-bold ${r.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
-                {r.ok ? `✓ ${r.detail}` : '✕ 위반'}
-              </span>
-            </div>
-          ))}
-          {!ok && snap.failReason && (
-            <div className="rounded border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-200">
-              {snap.failReason}
-            </div>
-          )}
-          {ok && (
-            <div className="rounded border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-[12.5px] leading-relaxed text-emerald-100">
-              습관을 쓰지 않고 이겼습니다. 해당 손버릇의 가중치가 실제로 낮아졌으며,
-              당신의 AI 파이터 성향에도 즉시 반영되었습니다.
-            </div>
-          )}
-        </div>
-        <div className="flex gap-2 border-t border-white/10 px-5 py-4">
-          <button onClick={onRetry} className="flex-1 rounded-md border border-white/25 bg-white/10 py-2.5 font-mono text-xs font-bold tracking-widest text-white/85 transition hover:bg-white/20">
-            재도전
-          </button>
-          <button onClick={onFree} className="flex-1 rounded-md border border-cyan-300/40 bg-cyan-400/10 py-2.5 font-mono text-xs tracking-widest text-cyan-200 transition hover:bg-cyan-400/20">
-            자유 훈련
-          </button>
-          <button onClick={onLab} className="flex-1 rounded-md border border-white/15 py-2.5 font-mono text-xs tracking-widest text-white/55 transition hover:bg-white/10">
-            AI LAB
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Ghost 업로드 연출
-function UploadFlash({ name, v }: { name: string; v: number }) {
-  return (
-    <div className="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="text-center">
-        <div className="font-mono text-[11px] tracking-[0.4em] text-violet-300/80">GHOST UPLOAD COMPLETE</div>
-        <div className="mt-2 text-6xl">☁</div>
-        <div className="mt-1 bg-gradient-to-r from-violet-200 via-white to-fuchsia-300 bg-clip-text text-4xl font-black tracking-tighter text-transparent">
-          {name}
-        </div>
-        <div className="mt-2 font-mono text-sm text-white/60">
-          v{v} · 이제 당신이 없어도 싸웁니다
-        </div>
-        <div className="mt-1 font-mono text-[11px] text-emerald-300/70">
-          전 세계 유저가 당신의 AI에 도전할 수 있습니다
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── AI 생성 연출
-function GenerationFlash({ name }: { name: string }) {
-  return (
-    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm">
-      <div className="text-center">
-        <div className="font-mono text-[11px] tracking-[0.4em] text-cyan-300/80">NEURAL CLONE COMPLETE</div>
-        <div className="mt-2 animate-pulse bg-gradient-to-r from-cyan-200 via-white to-fuchsia-300 bg-clip-text text-6xl font-black tracking-tighter text-transparent">
-          {name}
-        </div>
-        <div className="mt-2 font-mono text-sm text-white/60">생성 완료 — 이제 당신 대신 싸웁니다</div>
-      </div>
-    </div>
-  );
-}
-
-
-
-
-
-function AiMatchResult({ s, onAgain, onLab }: {
-  s: ReturnType<typeof useMirrorGame>['snapshot']; onAgain: () => void; onLab: () => void;
-}) {
-  const win = s.wins[0] > s.wins[1];
-  return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-xl border border-white/15 bg-[#070a14] p-5 text-center">
-        <div className="font-mono text-[10px] tracking-[0.3em] text-white/40">ASYNC MATCH RESULT</div>
-        <div className={`mt-1 text-3xl font-black ${win ? 'text-cyan-200' : 'text-fuchsia-300'}`}>
-          {win ? `${s.names[0]} 승리` : `${s.names[1]} 승리`}
-        </div>
-        <div className="mt-1 font-mono text-lg text-white/70">{s.wins[0]} : {s.wins[1]}</div>
-        <p className="mt-3 text-[12.5px] leading-relaxed text-white/55">
-          {win
-            ? '당신의 전투 DNA가 통했습니다. 이 성향을 더 강화하려면 같은 플레이를 반복 학습시키세요.'
-            : '상대 스타일에 카운터당했습니다. LAB에서 약점 진단을 확인하고 새로운 플레이를 보여주세요.'}
-        </p>
-        <div className="mt-4 flex gap-2">
-          <button onClick={onAgain} className="flex-1 rounded-md border border-white/20 py-2.5 font-mono text-xs tracking-widest text-white/70 transition hover:bg-white/10">
-            리매치
-          </button>
-          <button onClick={onLab} className="flex-1 rounded-md border border-cyan-300/50 bg-cyan-400/15 py-2.5 font-mono text-xs font-bold tracking-widest text-cyan-100 transition hover:bg-cyan-400/25">
-            ▸ AI LAB
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
